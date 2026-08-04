@@ -110,6 +110,16 @@ docker compose up               # api, web, qdrant, postgres, grafana, prefect
 3. Evals: `uv run eval/run_retrieval.py` (see `eval/README` for the full harness);
    dashboards at `localhost:3001` (Grafana), traces at `localhost:3002` (Langfuse).
 
+## Development
+
+```bash
+uv sync        # install (Python 3.12, pinned via .python-version)
+make check     # everything CI runs: ruff lint+format, mypy, pytest
+```
+
+CI (GitHub Actions) runs `make check`'s steps plus a compose validation on every PR
+and push to master.
+
 ## Rubric map (for reviewers)
 
 | Criterion | Where |

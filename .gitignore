@@ -1,0 +1,21 @@
+# secrets
+.env
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# node / next.js (web/)
+node_modules/
+web/.next/
+
+# local data artifacts (the pinned snapshot IS committed; bulk/full-text is not)
+data/full_text/
+data/*.duckdb
+
+# os / editors
+.DS_Store
