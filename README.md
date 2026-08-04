@@ -1,190 +1,136 @@
-# llm-zoomcamp-project-capstone
+# PaperTrace — an agentic RAG app for the RAG/agents/eval/LLMOps literature
 
-## HR Data Q&A  -- A Hybrid RAG System for Tabular HR Data
+An AI research assistant over the ~12,500 arXiv papers on **RAG, LLM agents, LLM
+evaluation, and LLMOps** — the literature about the very techniques it's built from.
+Ask it a question and watch it think: an agent visibly rewrites your query, chooses
+tools, gathers evidence across paper text *and* paper metadata, then answers with
+citations back to arXiv.
 
-A retrieval-augmented question-answering system over tabular HR data (ADP-style
-employee/roster exports). Roster-RAG accepts a CSV through a guided **workflow**,
-cleans and indexes it into a durable knowledge base, then lets you **chat** with
-the data — routing each question to the right engine: semantic search for fuzzy,
-descriptive questions and structured SQL for counts, filters, and aggregates.
-
-This is my LLM Zoomcamp capstone: an end-to-end RAG application built and owned by me.
+This is my LLM Zoomcamp capstone: an end-to-end agentic RAG application — ingestion to
+cloud — built and owned by me. The full decision trail lives in
+[`SPEC.md`](SPEC.md) and the wayfinder map under
+[`.scratch/arxiv-assistant/`](.scratch/arxiv-assistant/map.md).
 
 ---
 
 ## The problem
 
-Most questions you actually ask of HR data are **analytical, not semantic** —
-*"How many engineers are in the Houston office?"*, *"What's average tenure by
-department?"*, *"Who reports to Jane Smith?"*. These are `GROUP BY` / `WHERE` /
-join questions, and naive RAG (chunk rows → embed → cosine similarity) is genuinely
-bad at counting and exact-match filtering. Ask "how many engineers" of a vector
-store and top-k retrieval hands you a vibe, not a number.
+Questions about a fast-moving research field come in two shapes, and most tools serve
+only one:
 
-But some HR questions *are* fuzzy and descriptive — *"Tell me about our senior
-ICs"*, *"Who has machine-learning experience?"* — and those are where semantic
-retrieval shines.
+- **Semantic** — *"How do the main approaches to evaluating RAG faithfulness differ?"*
+  Needs meaning-level search over paper text and multi-paper synthesis.
+- **Analytical** — *"How many agent-evaluation papers were published each month of
+  2026?"* Needs counting, filtering, grouping — things vector search is structurally
+  bad at.
 
-**HR Data Q&A treats this as a routing problem.** A lightweight router classifies
-intent and dispatches to one of two tools: a structured-query tool over DuckDB for
-analytical questions, and a semantic-search tool over a vector index for descriptive
-ones. Both return grounded context that the LLM uses to answer — no ungrounded
-guessing, full provenance.
+Big scholarly tools (Elicit, ScholarQA, alphaXiv) answer over all of science and can't
+afford per-paper depth on one niche; no open tool serves this niche with both layers.
+PaperTrace treats it as an **agent problem**: one LLM loop, two grounded tools —
 
----
+- `semantic_search` — hybrid (dense + sparse) retrieval with cross-encoder re-ranking
+  over a layered index: every paper's abstract, plus section-level full text for a
+  curated ~2,000-paper tier.
+- `metadata_query` — typed filters/aggregations over the full corpus's metadata in
+  DuckDB. Counts are counted, not vibed.
+
+The agent's whole thought process — rewritten queries, tool calls, evidence, latency —
+streams into the chat as an inline, collapsible **trace** on every answer.
 
 ## How it works
 
 ```
-                ┌──────────────── Streamlit UI ────────────────┐
-                │   Workflows tab            Chat tab           │
-                │   pick profile + upload    ask questions      │
-                └──────┬─────────────────────────┬──────────────┘
-                       │ ingest()                 │ orch.answer(q)
-                       ▼                           ▼
-            ┌─────────────────┐         ┌────────────────────────┐
-            │ Ingestion       │         │ Orchestrator           │
-            │ clean → load    │         │  router → tool calls   │
-            │ → index         │         │  → grounded synthesis  │
-            └────────┬────────┘         └───────┬────────────────┘
-                     │ writes                    │ reads
-                     ▼                           ▼
-          ┌──────────────────────┐     ┌──────────────────┐
-          │ Knowledge base       │     │ Tools            │
-          │ (per dataset_id)     │◄────│  structured_query│ → DuckDB
-          │  DuckDB + vector idx │     │  semantic_search │ → vector index
-          └──────────────────────┘     └──────────────────┘
+ browser ──► Next.js chat (inline agent trace, citations, 👍/👎)
+                │ SSE
+                ▼
+            FastAPI ──► LangGraph agent (evidence loop)
+                          ├── semantic_search ──► Qdrant   (hybrid + re-rank)
+                          └── metadata_query  ──► DuckDB   (CC0 arXiv metadata)
+                                   ▲
+                     Prefect ingestion (snapshot | daily delta)
+                                   ▲
+                     arXiv API (pinned queries, polite rate)
 
-          every turn → Postgres (route, SQL/chunks, latency, feedback) → dashboard
+ every turn ──► Langfuse trace (self-hosted)  +  Postgres row ──► Grafana (6 charts)
 ```
 
-### 1. Workflows (ingestion)
-A **workflow** is a named ingestion profile — expected schema, cleaning rules,
-which columns become semantic "cards" vs. structured fields, and sample questions.
-The user picks a workflow (v1 ships with **ADP HR Roster**), uploads a CSV, and
-ingestion cleans it, loads it into a DuckDB table, builds a vector index over the
-narrative cards, and writes the whole thing to disk under a `dataset_id`. The UI
-holds only that id in session state — chat never re-ingests.
+- **Corpus:** ~12,526 papers (8 pinned topical queries, 2020→now, verified against
+  arXiv search). Metadata and abstracts are CC0 and ship in the repo; full text is
+  fetched at ingest (HTML-first) and never redistributed. A **pinned snapshot** makes
+  every eval and every reviewer run reproducible; the live instance refreshes daily.
+- **Agent:** LangGraph evidence loop — rewrite → tool-choice → gather → synthesize —
+  with Claude by default (Haiku dev / Sonnet demo), swappable to OpenAI/Groq/Ollama
+  with one env change. Embeddings and re-ranker run locally; the chat LLM is the only
+  paid API.
+- **Ingestion:** one parameterized Prefect flow, two modes (snapshot / daily delta):
+  fetch → normalize → load DuckDB → select full-text tier → parse → chunk → embed →
+  index → validate.
 
-### 2. Chat (retrieval flow)
-The orchestrator rewrites the query if needed, lets the LLM choose a tool (this
-*is* the router), executes the tool call against the active knowledge base, and
-synthesizes a grounded answer with citations. Every answer ships with a
-**"How I answered"** trace: route taken, generated SQL or retrieved chunks, and
-latency.
+## The eval story
 
-### 3. Evaluation
-- **Retrieval:** a ground-truth Q&A set scored with hit-rate / MRR, comparing
-  keyword (BM25), vector, and hybrid retrieval — the best performer is used.
-- **LLM output:** multiple prompt variants scored via LLM-as-a-Judge; SQL path
-  also checked with execution accuracy against expected results.
+No open-source paper assistant I surveyed ships a real evaluation. This one treats the
+eval as a first-class deliverable (`eval/`, results committed, report linked here):
 
-### 4. Monitoring
-Every turn and every thumbs up/down is logged to Postgres. A dashboard surfaces
-query volume over time, latency (p50/p95), route distribution (SQL vs. semantic),
-feedback rate, and retrieval-hit / SQL-error rate.
+| Layer | What's measured |
+|---|---|
+| Retrieval | 4-way ladder — BM25 → dense → hybrid → hybrid+re-rank — hit-rate@k / MRR on 140 pinned questions; winner ships |
+| Answers | 2 prompts × 2 models, LLM-as-judge (faithfulness, citation correctness, completeness) + hand spot-checks |
+| Agent | Routing accuracy, tool-arg exact match, execution accuracy on analytical queries |
+| CI | A free smoke slice runs on every push and fails on regression |
 
----
+Ground truth: ~200 LLM-generated, hand-checked questions pinned to the corpus snapshot,
+every record labeled with its expected tool.
 
-## Tech stack
+## Ops
 
-| Layer            | Choice                                              |
-|------------------|-----------------------------------------------------|
-| Interface        | Streamlit (Workflows + Chat pages)                  |
-| Orchestration    | Python orchestrator with a framework-agnostic tool contract |
-| Structured store | DuckDB (read-only query connection)                 |
-| Vector store     | DuckDB VSS extension *(or a standalone index)*      |
-| LLM              | *(pluggable — OpenAI / Ollama / Groq)*              |
-| Monitoring       | Postgres for logs + dashboard                       |
-| Packaging        | Docker Compose                                       |
-| Data             | Synthetic ADP-style HR data (generator included)    |
+Every turn dual-writes: a full **Langfuse** trace (self-hosted — the whole LLMOps stack
+runs in this repo's compose) and a flat **Postgres** row feeding a **Grafana**
+dashboard-as-code with six charts (volume, latency p50/p95, route split, feedback rate,
+cost/day, tool-error rate). User feedback (👍/👎 + comment) lands in both.
 
----
-
-## Data
-
-The dataset is **synthetic** — generated to mimic the shape of an ADP HR roster
-export, with deliberate edge cases baked in (null sentinels, stripped leading
-zeros on IDs, currency/percent strings, mixed date formats). This sidesteps any
-PII concern and makes the project fully reproducible: run the generator and you
-have the exact dataset. See [`data/generate.py`](data/generate.py).
-
----
+Deployment is **Fly.io, fully self-hosted, estate-as-code**: a `fly.toml` per app plus
+an idempotent `bootstrap.sh` — the same compose stack you run locally is what runs in
+production. GitHub Actions lint/test/eval-smoke every PR and auto-deploy green merges.
+The live demo is guarded by a per-session rate limit and a $2/day LLM spend cap.
 
 ## Quickstart
 
 ```bash
-git clone https://github.com/<you>/roster-rag.git
-cd roster-rag
-cp .env.example .env          # set your LLM key / endpoint
-docker compose up             # brings up app + Postgres + dashboard
-# open http://localhost:8501
+git clone https://github.com/mr-j90/llm-zoomcamp-project-capstone.git
+cd llm-zoomcamp-project-capstone
+cp .env.example .env            # set ANTHROPIC_API_KEY (or swap provider — see docs)
+docker compose up               # api, web, qdrant, postgres, grafana, prefect
+                                # (+ langfuse via: --profile observability)
+# open http://localhost:3000
 ```
 
-1. Generate the sample data: `python data/generate.py` *(or it ships in `data/`)*
-2. **Workflows** tab → pick *ADP HR Roster* → upload the CSV → **Ingest**
-3. **Chat** tab → ask away (try the sample questions)
+1. Ingest the pinned snapshot: `docker compose run ingest snapshot`
+   (or a fast, tiny full-text tier: `FULLTEXT_BUDGET=25 docker compose run ingest snapshot`)
+2. Ask something — try the suggested chips, and open the trace on any answer.
+3. Evals: `uv run eval/run_retrieval.py` (see `eval/README` for the full harness);
+   dashboards at `localhost:3001` (Grafana), traces at `localhost:3002` (Langfuse).
 
-Full setup, including running the evaluation harness and viewing the dashboard,
-is in [`docs/setup.md`](docs/setup.md).
+## Rubric map (for reviewers)
 
----
+| Criterion | Where |
+|---|---|
+| Problem description | This README + [SPEC §1](SPEC.md) |
+| Retrieval flow | Knowledge base (Qdrant + DuckDB) + LLM agent |
+| Retrieval evaluation | 4-way ladder, best used · `eval/` |
+| LLM evaluation | 2×2 grid, LLM-judge + execution accuracy · `eval/` |
+| Interface | Next.js UI **and** FastAPI API |
+| Ingestion pipeline | Prefect (dedicated tool) · `ingest/` |
+| Monitoring | Feedback + Grafana dashboard (6 charts) · `monitoring/` |
+| Containerization | Everything in docker-compose |
+| Reproducibility | Pinned snapshot + committed queries/IDs + pinned deps |
+| Best practices | Hybrid search · re-ranking · query rewriting (all evidenced in `eval/`) |
+| Cloud | Fly.io, estate-as-code · `deploy/fly/` |
 
-## Evaluation criteria mapping
+## v2 (explicitly deferred)
 
-*(For reviewers — where each rubric item lives.)*
-
-| Criterion              | Where it's met                                                        |
-|------------------------|-----------------------------------------------------------------------|
-| Problem description    | This README, "The problem"                                            |
-| Retrieval flow         | Knowledge base (DuckDB + vector) + LLM in the orchestrator            |
-| Retrieval evaluation   | BM25 vs. vector vs. hybrid, hit-rate / MRR — best used  ·  `eval/`     |
-| LLM evaluation         | Multiple prompt variants, LLM-as-Judge + SQL execution accuracy  ·  `eval/` |
-| Interface              | Streamlit UI (Workflows + Chat)                                       |
-| Ingestion pipeline     | Automated `ingest()` writing a durable per-dataset KB                 |
-| Monitoring             | Feedback collected + dashboard with 5 charts                          |
-| Containerization       | Everything in `docker-compose.yml`                                    |
-| Reproducibility        | Synthetic data generator, pinned versions, step-by-step setup         |
-| Best practices         | Hybrid search; (re-ranking; query rewriting)                          |
-| Bonus                  | Structured-query (text-to-SQL) tool alongside semantic RAG            |
-
----
-
-## Roadmap (post-course v2)
-
-The orchestrator depends only on a stable tool contract, so v1 is built to grow:
-
-- **Deepen the structured-query tool:** v1 uses scoped text-to-SQL / templates;
-  v2 adds multi-table joins across monthly exports, SQL self-correction on errors,
-  and multi-step tool calls.
-- **Expose tools as an MCP server** (FastMCP) so the query layer is reusable by
-  any MCP client, not welded to this app.
-- **Migrate the front end to Nuxt + FastAPI** with streaming responses and live
-  tool-call status.
-- **Add more workflows** — each is just a new entry in the workflow registry.
-
----
-
-## Repo layout
-
-```
-roster-rag/
-├── app/                  # Streamlit UI (workflows + chat pages)
-├── core/
-│   ├── orchestrator.py   # router + tool loop (framework-agnostic)
-│   ├── tools/            # semantic_search, structured_query
-│   └── ingest.py         # clean → load → index
-├── data/
-│   └── generate.py       # synthetic ADP-style data generator
-├── eval/                 # retrieval + LLM evaluation harnesses
-├── monitoring/           # dashboard + logging
-├── docs/                 # setup.md, usage.md
-├── docker-compose.yml
-└── README.md
-```
-
----
+Live fetch of out-of-corpus papers · paper upload · per-paper deep-dive surface ·
+scheduled digests · text-to-SQL for the metadata store · MCP server exposure.
 
 ## License
 
-MIT *(or your choice)*
+MIT
