@@ -120,6 +120,21 @@ make check     # everything CI runs: ruff lint+format, mypy, pytest
 CI (GitHub Actions) runs `make check`'s steps plus a compose validation on every PR
 and push to master.
 
+### Corpus snapshot
+
+The pinned corpus ships in the repo — `data/snapshot/` holds the metadata JSONL
+(CC0), the sorted ID list, and a manifest with per-topic counts; **you don't need to
+fetch anything to use it.** To regenerate it from the committed query definitions
+(`data/queries.toml`, the corpus's source of truth):
+
+```bash
+uv run python -m ingest.snapshot              # full harvest, ~5 min at arXiv's polite rate
+uv run python -m ingest.snapshot --limit 50   # quick smoke run (don't commit)
+```
+
+The harvester respects arXiv's API terms (1 request / 3 s, single connection) and
+fails loudly rather than committing a short corpus.
+
 ## Rubric map (for reviewers)
 
 | Criterion | Where |

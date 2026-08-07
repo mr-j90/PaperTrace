@@ -1,0 +1,33 @@
+# PaperTrace corpus definition — the source of truth for what's in the corpus (SPEC §4).
+# The corpus is the union of these topic queries over the pinned submittedDate window.
+# Feasibility, counts, and rate-limit rules: .scratch/arxiv-assistant/research/02-arxiv-data-access.md
+# (branch research/arxiv-data-access). Verified union count on 2026-07-31: 12,526 papers.
+
+[window]
+# Keeps the founding papers (Lewis et al. RAG is 2020).
+start = "2020-01-01"
+# Pinned cutoff so the snapshot is exactly reproducible as arXiv grows.
+# Papers after the cutoff reach the live instance via the daily delta refresh (issue #10).
+end = "2026-08-01"
+
+[[topics]]
+name = "rag"
+field = "abs"
+phrases = ["retrieval augmented generation", "retrieval-augmented"]
+
+[[topics]]
+name = "agents"
+field = "abs"
+phrases = ["LLM agent", "LLM agents", "language model agents", "LLM-based agent"]
+
+[[topics]]
+name = "eval"
+field = "abs"
+phrases = ["LLM evaluation", "evaluating large language models", "LLM-as-a-judge"]
+
+[[topics]]
+# The exact token is rare in metadata (9 papers all-time, verified) but cheap to include;
+# most LLMOps papers surface via the other phrase groups.
+name = "llmops"
+field = "all"
+phrases = ["LLMOps"]

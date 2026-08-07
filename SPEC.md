@@ -79,10 +79,12 @@ exposure.
 *(Decisions: [02](.scratch/arxiv-assistant/issues/02-arxiv-data-access.md),
 [04](.scratch/arxiv-assistant/issues/04-corpus-and-ingestion.md).)*
 
-- **Boundary:** the verified 8-phrase union (RAG + LLM-agent + LLM-eval + LLMOps
-  variants) over abstracts, submitted 2020→now — **~12,526 papers** (verified against
-  arXiv search 2026-07-31). Query definitions are committed to the repo as the corpus's
-  source of truth.
+- **Boundary:** the verified phrase union (RAG + LLM-agent + LLM-eval + LLMOps
+  variants) over abstracts, submitted 2020→2026-08-01 (pinned) — ~12,526 papers at
+  research verification (2026-07-31); **the committed snapshot manifest is the source
+  of truth** (13,082 papers harvested 2026-08-07 — the delta is API-vs-search-UI
+  counting and indexing lag on the pinned window). Query definitions are committed at
+  `data/queries.toml`.
 - **Tiering:** abstracts + CC0 metadata for **all** papers, shipped in-repo as JSONL.
   Full text for a **hybrid ~2k tier**: top ~1,000 by Semantic Scholar citation count +
   everything from the trailing ~6 months; the tier budget is a config parameter so a
@@ -221,7 +223,7 @@ used. The app is end-to-end: ingestion → knowledge base → agent → UI → m
 ├── docker-compose.yml            # app, qdrant, postgres, grafana, prefect
 │                                 # + langfuse compose include (profile)
 ├── pyproject.toml                # uv-managed, pinned
-├── data/                         # pinned snapshot: queries.yaml, id list, metadata JSONL
+├── data/                         # pinned snapshot: queries.toml, id list, metadata JSONL
 ├── ingest/                       # Prefect flow (snapshot | daily-delta modes)
 ├── core/                         # LangGraph agent, tools, retrieval, config
 ├── api/                          # FastAPI (chat SSE, feedback, health)
