@@ -1,0 +1,31 @@
+{
+  "snapshot_date": "2026-08-07",
+  "window": {
+    "start": "2020-01-01",
+    "end": "2026-08-01"
+  },
+  "smoke_limit": null,
+  "topics": {
+    "rag": {
+      "query": "(abs:\"retrieval augmented generation\" OR abs:\"retrieval-augmented\") AND submittedDate:[202001010000 TO 202608010000]",
+      "api_total": 6732,
+      "in_corpus": 6732
+    },
+    "agents": {
+      "query": "(abs:\"LLM agent\" OR abs:\"LLM agents\" OR abs:\"language model agents\" OR abs:\"LLM-based agent\") AND submittedDate:[202001010000 TO 202608010000]",
+      "api_total": 4769,
+      "in_corpus": 4769
+    },
+    "eval": {
+      "query": "(abs:\"LLM evaluation\" OR abs:\"evaluating large language models\" OR abs:\"LLM-as-a-judge\") AND submittedDate:[202001010000 TO 202608010000]",
+      "api_total": 2005,
+      "in_corpus": 2005
+    },
+    "llmops": {
+      "query": "(all:\"LLMOps\") AND submittedDate:[202001010000 TO 202608010000]",
+      "api_total": 9,
+      "in_corpus": 9
+    }
+  },
+  "total_unique": 13124
+}

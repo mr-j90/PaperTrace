@@ -3,7 +3,9 @@ name = "papertrace"
 version = "0.1.0"
 description = "Agentic RAG assistant over the RAG/agents/eval/LLMOps slice of arXiv"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "httpx>=0.28.1",
+]
 
 [dependency-groups]
 dev = [
