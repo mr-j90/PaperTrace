@@ -5,8 +5,11 @@ The visible trace (SSE streaming) arrives with #7; metadata_query with #6.
 """
 
 import json
+import logging
 import re
-from dataclasses import dataclass
+import time
+from collections.abc import AsyncIterator
+from dataclasses import asdict, dataclass
 from datetime import date
 from typing import Any
 
@@ -90,6 +93,106 @@ def _evidence_titles(messages: list[Any]) -> dict[str, str]:
     return titles
 
 
+def _ground_citations(answer: str, evidence: dict[str, str]) -> list[Citation]:
+    cited_ids = list(dict.fromkeys(CITATION_PATTERN.findall(answer)))
+    return [
+        Citation(arxiv_id=cid, title=evidence[cid], url=f"https://arxiv.org/abs/{cid}")
+        for cid in cited_ids
+        if cid in evidence  # only citations grounded in evidence actually returned
+    ]
+
+
+async def stream_chat(
+    graph: CompiledStateGraph[Any], question: str, max_turns: int
+) -> AsyncIterator[dict[str, Any]]:
+    """The Trace as data (SPEC §7): tool calls, evidence, tokens, then the grounded answer.
+
+    Event shapes: {type: tool_call, name, args} · {type: tool_result, name, summary}
+    · {type: token, text} · {type: done, answer, citations} · {type: error, detail}.
+    """
+    tool_payloads: list[str] = []
+    answer_parts: list[str] = []
+    tool_started: dict[str, float] = {}  # run_id -> monotonic start, for Trace latency
+    try:
+        async for event in graph.astream_events(
+            {"messages": [("user", question)]},
+            config={"recursion_limit": 2 * max_turns + 1},
+            version="v2",
+        ):
+            kind = event["event"]
+            if kind == "on_chat_model_stream":
+                text = event["data"]["chunk"].text
+                if text:
+                    answer_parts.append(text)
+                    yield {"type": "token", "text": text}
+            elif kind == "on_tool_start":
+                answer_parts.clear()  # tokens so far were pre-tool reasoning, not the answer
+                tool_started[event["run_id"]] = time.monotonic()
+                yield {
+                    "type": "tool_call",
+                    "name": event["name"],
+                    "args": event["data"].get("input", {}),
+                }
+            elif kind == "on_tool_end":
+                output = event["data"].get("output")
+                content = output.content if isinstance(output, ToolMessage) else str(output)
+                tool_payloads.append(str(content))
+                started = tool_started.pop(event["run_id"], None)
+                yield {
+                    "type": "tool_result",
+                    "name": event["name"],
+                    "summary": _summarize_tool_payload(str(content)),
+                    "ms": round((time.monotonic() - started) * 1000) if started else None,
+                }
+    except GraphRecursionError:
+        yield {"type": "error", "detail": f"no answer within {max_turns} turns"}
+        return
+    except Exception:  # surface mid-stream failures as an event, not a dropped connection
+        logging.getLogger(__name__).exception("evidence loop failed mid-stream")
+        yield {"type": "error", "detail": "the evidence loop failed — try again"}
+        return
+    answer = "".join(answer_parts)
+    evidence = _evidence_titles([ToolMessage(content=p, tool_call_id="t") for p in tool_payloads])
+    citations = _ground_citations(answer, evidence)
+    yield {
+        "type": "done",
+        "answer": answer,
+        "citations": [asdict(c) for c in citations],
+    }
+
+
+def _summarize_tool_payload(content: str) -> dict[str, Any]:
+    """Compact view of a tool result for the Trace: counts and ids, not full text."""
+    try:
+        payload = json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        return {"raw": content[:200]}
+    if isinstance(payload, list):  # semantic_search evidence
+        return {
+            "evidence": [
+                {"arxiv_id": item.get("arxiv_id"), "title": item.get("title")}
+                for item in payload
+                if isinstance(item, dict)
+            ]
+        }
+    if isinstance(payload, dict):  # metadata_query result
+        summary: dict[str, Any] = {"total": payload.get("total")}
+        if payload.get("sql"):
+            summary["sql"] = payload["sql"]
+        rows = payload.get("rows", [])
+        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+            if "arxiv_id" in rows[0]:
+                summary["evidence"] = [
+                    {"arxiv_id": r.get("arxiv_id"), "title": r.get("title")} for r in rows
+                ]
+            else:
+                summary["groups"] = rows[:24]
+        if payload.get("note") or payload.get("error"):
+            summary["note"] = payload.get("note") or payload.get("error")
+        return summary
+    return {"raw": content[:200]}
+
+
 def run_chat(graph: CompiledStateGraph[Any], question: str, max_turns: int) -> ChatResult:
     try:
         state = graph.invoke(
@@ -102,11 +205,6 @@ def run_chat(graph: CompiledStateGraph[Any], question: str, max_turns: int) -> C
 
     messages = state["messages"]
     answer = messages[-1].text  # joins multi-block content (e.g. thinking + text) correctly
-    evidence = _evidence_titles(messages)
-    cited_ids = list(dict.fromkeys(CITATION_PATTERN.findall(answer)))
-    citations = [
-        Citation(arxiv_id=cid, title=evidence[cid], url=f"https://arxiv.org/abs/{cid}")
-        for cid in cited_ids
-        if cid in evidence  # only citations grounded in evidence actually returned
-    ]
-    return ChatResult(answer=answer, citations=citations)
+    return ChatResult(
+        answer=answer, citations=_ground_citations(answer, _evidence_titles(messages))
+    )
