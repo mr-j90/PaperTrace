@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     qdrant_url: str = "http://localhost:6333"
     collection: str = "papers"
     search_k: int = 8
-    max_turns: int = 6  # model turns in the evidence loop before giving up
+    max_turns: int = 10  # model turns in the evidence loop before giving up
 
 
 def load_settings() -> Settings:

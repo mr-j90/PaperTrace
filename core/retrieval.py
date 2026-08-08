@@ -27,9 +27,12 @@ def point_id(arxiv_id: str, layer: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"papertrace:{arxiv_id}:{layer}"))
 
 
-def card_text(title: str, abstract: str, submitted: str, categories: list[str]) -> str:
+def card_text(
+    title: str, abstract: str, authors: list[str], submitted: str, categories: list[str]
+) -> str:
     """An abstract card: the per-paper searchable unit (CONTEXT.md)."""
-    return f"{title}\n\n{abstract}\n\n({submitted[:10]}; {', '.join(categories)})"
+    names = ", ".join(authors[:5]) + (" et al." if len(authors) > 5 else "")
+    return f"{title}\n{names}\n\n{abstract}\n\n({submitted[:10]}; {', '.join(categories)})"
 
 
 class SemanticIndex:
@@ -61,7 +64,13 @@ class SemanticIndex:
 
     def index_abstracts(self, records: list[dict[str, Any]]) -> int:
         texts = [
-            card_text(str(r["title"]), str(r["abstract"]), str(r["submitted"]), r["categories"])
+            card_text(
+                str(r["title"]),
+                str(r["abstract"]),
+                r["authors"],
+                str(r["submitted"]),
+                r["categories"],
+            )
             for r in records
         ]
         vectors = self._embed(texts)
