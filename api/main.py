@@ -3,6 +3,7 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
@@ -12,8 +13,9 @@ from pydantic import BaseModel
 
 from core.agent import MaxTurnsExceeded, build_agent, run_chat
 from core.config import Settings, load_settings
+from core.metadata import MetadataStore
 from core.retrieval import SemanticIndex
-from core.tools import make_semantic_search
+from core.tools import make_metadata_query, make_semantic_search
 
 
 class ChatRequest(BaseModel):
@@ -34,7 +36,9 @@ class ChatResponse(BaseModel):
 def build_graph(settings: Settings) -> Any:
     model = init_chat_model(settings.chat_model)
     index = SemanticIndex.from_settings(settings)
-    return build_agent(model, [make_semantic_search(index, settings.search_k)])
+    store = MetadataStore(Path(settings.duckdb_path))
+    tools = [make_semantic_search(index, settings.search_k), make_metadata_query(store)]
+    return build_agent(model, tools)
 
 
 @asynccontextmanager
