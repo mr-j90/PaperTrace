@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from dataclasses import asdict
 from typing import Any
 
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from langchain.chat_models import init_chat_model
 from pydantic import BaseModel
@@ -38,6 +39,9 @@ def build_graph(settings: Settings) -> Any:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Provider SDKs read credentials from the process env; pydantic-settings only
+    # loads its own PAPERTRACE_* fields, so surface .env for local runs too.
+    load_dotenv()
     settings = load_settings()
     app.state.settings = settings
     app.state.graph = build_graph(settings)
