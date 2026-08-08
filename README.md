@@ -116,7 +116,12 @@ docker compose up               # api, web, qdrant, postgres, grafana, prefect
 uv sync        # install (Python 3.12, pinned via .python-version)
 make check     # everything CI runs: ruff lint+format, mypy, pytest
 
-cd web && bun install && bun dev   # chat UI on :3000 (API on :8000 via uvicorn)
+make up        # build + start the full stack (web :3000, api :8000, prefect :4200)
+make ingest    # build the knowledge base (tiny full-text tier; FULLTEXT_BUDGET=n)
+make down      # stop it (volumes survive) · make reset wipes volumes too
+
+make dev       # infra only — then: uv run uvicorn api.main:app --port 8000
+cd web && bun install && bun dev   # and the chat UI on :3000, from source
 ```
 
 CI (GitHub Actions) runs `make check`'s steps plus a compose validation on every PR
