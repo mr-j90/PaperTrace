@@ -147,6 +147,8 @@ PAPERTRACE_FULLTEXT_BUDGET=25 uv run python -m ingest.flow   # minutes; full tie
 ```
 
 Watch the run (and its validation report artifact) at http://localhost:4200.
+When an update changes the index shape (e.g. #5's hybrid vectors), the flow
+recreates the collection and logs it — just re-run the flow after pulling.
 `--fulltext-budget N` (or the env var) caps the full-text tier; within the budget,
 half goes to the newest papers and half to the most-cited (Semantic Scholar), so
 the tier stays hybrid at any size. Abstract cards cover every non-withdrawn paper

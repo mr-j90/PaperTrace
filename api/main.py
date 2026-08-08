@@ -42,6 +42,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Provider SDKs read credentials from the process env; pydantic-settings only
     # loads its own PAPERTRACE_* fields, so surface .env for local runs too.
     load_dotenv()
+    # NOTE (#11): building the graph loads local models synchronously — first boot
+    # downloads ~1.2GB (reranker) before /healthz serves. Deploy health checks
+    # need generous start periods or a warmed model cache volume.
     settings = load_settings()
     app.state.settings = settings
     app.state.graph = build_graph(settings)

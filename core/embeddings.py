@@ -1,8 +1,19 @@
-"""Local dense embeddings (SPEC §5: embeddings stay local; the chat LLM is the only paid API)."""
+"""Local embedding models (SPEC §5: retrieval stays local; the chat LLM is the only paid API)."""
 
 from collections.abc import Callable
+from dataclasses import dataclass
 
 Embedder = Callable[[list[str]], list[list[float]]]
+
+SparseVec = tuple[list[int], list[float]]  # (indices, values)
+
+
+@dataclass
+class SparseEmbedder:
+    """BM25-style sparse vectors; doc and query sides weight differently."""
+
+    embed_docs: Callable[[list[str]], list[SparseVec]]
+    embed_query: Callable[[str], SparseVec]
 
 
 def load_embedder(model_name: str) -> Embedder:
@@ -16,3 +27,19 @@ def load_embedder(model_name: str) -> Embedder:
         return [vector.tolist() for vector in vectors]
 
     return embed
+
+
+def load_sparse_embedder(model_name: str) -> SparseEmbedder:
+    """fastembed BM25 term weights; Qdrant applies IDF server-side (Modifier.IDF)."""
+    from fastembed import SparseTextEmbedding
+
+    model = SparseTextEmbedding(model_name)
+
+    def embed_docs(texts: list[str]) -> list[SparseVec]:
+        return [(e.indices.tolist(), e.values.tolist()) for e in model.embed(texts)]
+
+    def embed_query(text: str) -> SparseVec:
+        [e] = list(model.query_embed(text))
+        return (e.indices.tolist(), e.values.tolist())
+
+    return SparseEmbedder(embed_docs=embed_docs, embed_query=embed_query)
