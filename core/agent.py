@@ -7,6 +7,7 @@ The visible trace (SSE streaming) arrives with #7; metadata_query with #6.
 import json
 import re
 from dataclasses import dataclass
+from datetime import date
 from typing import Any
 
 from langchain.agents import create_agent
@@ -18,15 +19,25 @@ from langgraph.graph.state import CompiledStateGraph
 
 SYSTEM_PROMPT = """\
 You are PaperTrace, a research assistant over arXiv papers on RAG, LLM agents,
-LLM evaluation, and LLMOps.
+LLM evaluation, and LLMOps. The corpus starts at 2020; freshness is bounded by
+the latest ingest. Today's date: {today}. Use it to turn relative dates
+("this week", "last month") into absolute YYYY-MM-DD filters.
+
+Tools:
+- semantic_search — meaning-level search over paper abstracts and full text.
+  Use for conceptual questions ("how do X approaches differ?").
+- metadata_query — exact counts, groupings, listings, and date-filtered
+  queries over paper metadata. Always use it for "how many", "per month",
+  "latest", "papers by <author>", and "what's new since <date>" questions —
+  never estimate numbers from search results.
 
 Rules:
-- Always call semantic_search before answering; search again with a rewritten
-  query if the first results don't cover the question.
-- Ground every claim in the returned evidence and cite papers inline as
-  [arxiv:<arxiv_id>], e.g. [arxiv:2005.11401].
+- Always ground answers in tool results; call a tool before answering and
+  rewrite your query if the first results don't cover the question.
+- Cite papers inline as [arxiv:<arxiv_id>], e.g. [arxiv:2005.11401]. Counts
+  from metadata_query are exact — report them as such.
 - If the evidence doesn't answer the question, say so plainly — never invent
-  papers or citations.
+  papers, citations, or numbers.
 """
 
 CITATION_PATTERN = re.compile(r"\[arxiv:([^\]\s]+)\]")
@@ -49,20 +60,33 @@ class MaxTurnsExceeded(Exception):
     """The evidence loop hit its max-turns cap without producing an answer."""
 
 
-def build_agent(model: BaseChatModel, tools: list[BaseTool]) -> CompiledStateGraph[Any]:
-    return create_agent(model, tools, system_prompt=SYSTEM_PROMPT)
+def build_agent(
+    model: BaseChatModel, tools: list[BaseTool], today: str | None = None
+) -> CompiledStateGraph[Any]:
+    prompt = SYSTEM_PROMPT.format(today=today or date.today().isoformat())
+    return create_agent(model, tools, system_prompt=prompt)
 
 
 def _evidence_titles(messages: list[Any]) -> dict[str, str]:
-    """arxiv_id -> title for every paper the tools actually returned this run."""
+    """arxiv_id -> title for every paper the tools actually returned this run.
+
+    semantic_search returns a list of evidence items; metadata_query returns a
+    dict whose `rows` may be paper listings. Both ground citations.
+    """
     titles: dict[str, str] = {}
     for message in messages:
-        if isinstance(message, ToolMessage):
-            try:
-                for item in json.loads(str(message.content)):
-                    titles[str(item["arxiv_id"])] = str(item.get("title", ""))
-            except (json.JSONDecodeError, TypeError, KeyError):
-                continue
+        if not isinstance(message, ToolMessage):
+            continue
+        try:
+            payload = json.loads(str(message.content))
+        except (json.JSONDecodeError, TypeError):
+            continue
+        items = payload.get("rows", []) if isinstance(payload, dict) else payload
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if isinstance(item, dict) and "arxiv_id" in item:
+                titles[str(item["arxiv_id"])] = str(item.get("title", ""))
     return titles
 
 
