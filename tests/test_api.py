@@ -3,20 +3,16 @@
 import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
-from qdrant_client import QdrantClient
 
 import api.main as api_main
 from core.agent import build_agent
 from core.config import Settings
-from core.retrieval import SemanticIndex
 from core.tools import make_semantic_search
-from tests.test_agent import DIM, LEWIS, fake_embedder, scripted_model
+from tests.conftest import LEWIS, make_index, scripted_model
 
 
 def fake_graph() -> object:
-    client = QdrantClient(":memory:")
-    index = SemanticIndex(client=client, collection="papers", embed=fake_embedder(), dim=DIM)
-    index.ensure_collection()
+    index = make_index()
     index.index_abstracts([LEWIS])
     model = scripted_model(
         [
@@ -31,9 +27,7 @@ def fake_graph() -> object:
 
 
 def looping_graph() -> object:
-    client = QdrantClient(":memory:")
-    index = SemanticIndex(client=client, collection="papers", embed=fake_embedder(), dim=DIM)
-    index.ensure_collection()
+    index = make_index()
     index.index_abstracts([LEWIS])
     endless = [
         AIMessage(

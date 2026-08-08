@@ -1,18 +1,22 @@
-"""Agent tools (SPEC §5). Tracer ships semantic_search; metadata_query arrives with #6."""
+"""Agent tools (SPEC §5). semantic_search final form; metadata_query arrives with #6."""
 
 import json
 
 from langchain_core.tools import BaseTool, tool
 
-from core.retrieval import SemanticIndex
+from core.retrieval import Scope, SemanticIndex
 
 
 def make_semantic_search(index: SemanticIndex, k: int) -> BaseTool:
     @tool
-    def semantic_search(query: str) -> str:
-        """Search the paper corpus by meaning. Returns matching papers as JSON:
-        arxiv_id, title, snippet, score. Cite papers by their arxiv_id."""
-        evidence = index.search(query, k)
+    def semantic_search(query: str, scope: Scope = "all") -> str:
+        """Search the paper corpus by meaning (hybrid keyword+vector, reranked).
+
+        scope: "abstracts" searches every paper's abstract card; "fulltext" searches
+        section-level passages of the full-text tier; "all" (default) searches both.
+        Returns matching papers as JSON: arxiv_id, title, snippet, score.
+        Cite papers by their arxiv_id."""
+        evidence = index.search(query, k, scope=scope)
         return json.dumps(
             [
                 {

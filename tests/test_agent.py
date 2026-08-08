@@ -1,73 +1,19 @@
-"""Tracer-bullet plumbing: tool call -> evidence -> cited answer, no network, no models."""
+"""Evidence-loop plumbing: tool call -> evidence -> cited answer, no network, no models."""
 
-from collections.abc import Iterator
-from typing import Any
+import json
 
 import pytest
-from langchain_core.language_models import GenericFakeChatModel
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import AIMessage
 from langchain_core.tools import BaseTool
-from qdrant_client import QdrantClient
 
 from core.agent import MaxTurnsExceeded, build_agent, run_chat
-from core.embeddings import Embedder
-from core.retrieval import SemanticIndex
 from core.tools import make_semantic_search
-
-DIM = 8
-
-LEWIS: dict[str, Any] = {
-    "arxiv_id": "2005.11401",
-    "title": "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks",
-    "abstract": "We explore RAG models which combine parametric and non-parametric memory.",
-    "authors": ["Patrick Lewis", "Ethan Perez"],
-    "submitted": "2020-05-22T21:17:29Z",
-    "categories": ["cs.CL"],
-    "topics": ["rag"],
-}
-OTHER: dict[str, Any] = {
-    "arxiv_id": "2401.99999",
-    "title": "An Unrelated Paper",
-    "abstract": "Something else entirely.",
-    "authors": ["A. Author"],
-    "submitted": "2024-01-05T00:00:00Z",
-    "categories": ["cs.AI"],
-    "topics": ["agents"],
-}
-
-
-def fake_embedder() -> Embedder:
-    """Deterministic vectors: texts mentioning RAG cluster at one corner."""
-
-    def embed(texts: list[str]) -> list[list[float]]:
-        return [
-            [1.0] + [0.0] * (DIM - 1)
-            if ("RAG" in text or "retrieval" in text.lower())
-            else [0.0] * (DIM - 1) + [1.0]
-            for text in texts
-        ]
-
-    return embed
-
-
-class ToolCallingFakeModel(GenericFakeChatModel):
-    """GenericFakeChatModel that accepts bind_tools (scripted responses ignore them)."""
-
-    def bind_tools(self, tools: Any, **kwargs: Any) -> Any:  # noqa: ANN401
-        return self
-
-
-def scripted_model(messages: list[AIMessage]) -> BaseChatModel:
-    iterator: Iterator[AIMessage | str] = iter(messages)
-    return ToolCallingFakeModel(messages=iterator)
+from tests.conftest import LEWIS, OTHER, make_index, scripted_model
 
 
 @pytest.fixture
 def search_tool() -> BaseTool:
-    client = QdrantClient(":memory:")
-    index = SemanticIndex(client=client, collection="papers", embed=fake_embedder(), dim=DIM)
-    index.ensure_collection()
+    index = make_index()
     index.index_abstracts([LEWIS, OTHER])
     return make_semantic_search(index, k=2)
 
@@ -128,8 +74,10 @@ def test_max_turns_cap(search_tool: BaseTool) -> None:
         run_chat(graph, "never answers", max_turns=6)
 
 
-def test_semantic_search_ranks_by_meaning(search_tool: BaseTool) -> None:
-    import json
-
+def test_semantic_search_scope_arg_via_tool(search_tool: BaseTool) -> None:
     hits = json.loads(search_tool.invoke({"query": "retrieval augmented generation"}))
     assert hits[0]["arxiv_id"] == "2005.11401"
+    scoped = json.loads(
+        search_tool.invoke({"query": "retrieval augmented generation", "scope": "fulltext"})
+    )
+    assert scoped == []  # no fulltext chunks indexed in this fixture

@@ -138,15 +138,10 @@ def test_chunk_sections_sizes_and_prefixes() -> None:
 
 
 def test_fulltext_reindex_and_prune_leave_no_orphans() -> None:
-    from qdrant_client import QdrantClient
+    from core.retrieval import FULLTEXT_LAYER
+    from tests.conftest import make_index
 
-    from core.retrieval import FULLTEXT_LAYER, SemanticIndex
-    from tests.test_agent import DIM, fake_embedder
-
-    index = SemanticIndex(
-        client=QdrantClient(":memory:"), collection="papers", embed=fake_embedder(), dim=DIM
-    )
-    index.ensure_collection()
+    index = make_index()
     index.index_chunks("paperA", "A", [("S1", "text one"), ("S2", "text two"), ("S3", "three")])
     index.index_chunks("paperB", "B", [("S1", "b text")])
     assert index.count(layer=FULLTEXT_LAYER) == 4

@@ -1,7 +1,7 @@
 """The evidence loop (SPEC §5): a LangGraph agent that searches, gathers, and synthesizes.
 
-Tracer scope: one semantic_search tool, dense retrieval, JSON in/out. The visible
-trace (SSE streaming) arrives with #7; metadata_query with #6.
+Current scope: one semantic_search tool (hybrid + reranked, per #5), JSON in/out.
+The visible trace (SSE streaming) arrives with #7; metadata_query with #6.
 """
 
 import json

@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     chat_model: str = "anthropic:claude-haiku-4-5"
     embedding_model: str = "BAAI/bge-small-en-v1.5"
     embedding_dim: int = 384  # must match embedding_model's output size
+    sparse_model: str = "Qdrant/bm25"  # fastembed sparse model; IDF applied by Qdrant
+    rerank_model: str = "BAAI/bge-reranker-base"  # local cross-encoder
+    rerank_candidates: int = 30  # fused pool rescored down to search_k
+    max_per_paper: int = 3  # evidence dedup cap per paper
     qdrant_url: str = "http://localhost:6333"
     collection: str = "papers"
     search_k: int = 8
