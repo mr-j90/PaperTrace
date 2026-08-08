@@ -115,6 +115,8 @@ docker compose up               # api, web, qdrant, postgres, grafana, prefect
 ```bash
 uv sync        # install (Python 3.12, pinned via .python-version)
 make check     # everything CI runs: ruff lint+format, mypy, pytest
+
+cd web && bun install && bun dev   # chat UI on :3000 (API on :8000 via uvicorn)
 ```
 
 CI (GitHub Actions) runs `make check`'s steps plus a compose validation on every PR

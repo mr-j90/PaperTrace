@@ -29,3 +29,27 @@ jobs:
 
       - name: Compose stub validates
         run: docker compose config --quiet
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3"
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Types
+        run: bun run typecheck
+
+      - name: Lint
+        run: bun run lint
+
+      - name: Build
+        run: bun run build

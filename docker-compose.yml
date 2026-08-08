@@ -1,7 +1,16 @@
 # PaperTrace stack — grows ticket by ticket (see SPEC.md §11).
-# Live now: api, qdrant, postgres, grafana, prefect. Arriving later:
-# web (#7), langfuse profile (#8).
+# Live now: web, api, qdrant, postgres, grafana, prefect. Arriving later:
+# langfuse profile (#8).
 services:
+  web:
+    build: web
+    ports:
+      - "3000:3000"
+    environment:
+      PAPERTRACE_API_URL: http://api:8000
+    depends_on:
+      - api
+
   prefect:
     image: prefecthq/prefect:3.8.2-python3.12  # keep in step with prefect in pyproject
     command: prefect server start --host 0.0.0.0

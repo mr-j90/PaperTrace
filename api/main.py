@@ -1,17 +1,19 @@
-"""PaperTrace API (SPEC §7). Tracer scope: JSON POST /chat + healthz; SSE arrives with #7."""
+"""PaperTrace API (SPEC §7): SSE chat streaming the Trace, feedback capture, health."""
 
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from dataclasses import asdict
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from langchain.chat_models import init_chat_model
 from pydantic import BaseModel
 
-from core.agent import MaxTurnsExceeded, build_agent, run_chat
+from core.agent import build_agent, stream_chat
 from core.config import Settings, load_settings
 from core.metadata import MetadataStore
 from core.retrieval import SemanticIndex
@@ -22,15 +24,11 @@ class ChatRequest(BaseModel):
     question: str
 
 
-class CitationOut(BaseModel):
-    arxiv_id: str
-    title: str
-    url: str
-
-
-class ChatResponse(BaseModel):
+class FeedbackRequest(BaseModel):
+    question: str
     answer: str
-    citations: list[CitationOut]
+    thumbs: Literal["up", "down"]
+    comment: str | None = None
 
 
 def build_graph(settings: Settings) -> Any:
@@ -57,6 +55,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(title="PaperTrace", lifespan=lifespan)
 
+FEEDBACK_PATH = Path("data/feedback.jsonl")  # interim sink; #8 dual-writes Postgres+Langfuse
+
 
 @app.get("/healthz")
 def healthz() -> dict[str, str]:
@@ -64,12 +64,30 @@ def healthz() -> dict[str, str]:
 
 
 @app.post("/chat")
-def chat(request: ChatRequest) -> ChatResponse:
+async def chat(request: ChatRequest) -> StreamingResponse:
+    """Stream the evidence loop as Server-Sent Events; final event carries the
+    grounded answer + citations. Event types: tool_call, tool_result, token,
+    done, error."""
     settings: Settings = app.state.settings
-    try:
-        result = run_chat(app.state.graph, request.question, settings.max_turns)
-    except MaxTurnsExceeded as exc:
-        raise HTTPException(status_code=504, detail=str(exc)) from exc
-    return ChatResponse(
-        answer=result.answer, citations=[CitationOut(**asdict(c)) for c in result.citations]
+    graph = app.state.graph
+
+    async def events() -> AsyncIterator[str]:
+        async for event in stream_chat(graph, request.question, settings.max_turns):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(
+        events(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/feedback", status_code=204)
+def feedback(request: FeedbackRequest) -> None:
+    record = {
+        "ts": datetime.now(UTC).isoformat(),
+        **request.model_dump(),
+    }
+    FEEDBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with FEEDBACK_PATH.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(record, ensure_ascii=False) + "\n")

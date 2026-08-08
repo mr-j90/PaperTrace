@@ -101,10 +101,47 @@ def make_index(
 
 
 class ToolCallingFakeModel(GenericFakeChatModel):
-    """GenericFakeChatModel that accepts bind_tools (scripted responses ignore them)."""
+    """GenericFakeChatModel that accepts bind_tools and streams tool-call messages.
+
+    The base class raises on empty-content messages under streaming; this override
+    emits tool calls as a single chunk and answer text word-by-word, so SSE tests
+    exercise real token streaming.
+    """
 
     def bind_tools(self, tools: Any, **kwargs: Any) -> Any:  # noqa: ANN401
         return self
+
+    def _stream(
+        self, messages: Any, stop: Any = None, run_manager: Any = None, **kwargs: Any
+    ) -> Any:  # noqa: ANN401
+        import json
+
+        from langchain_core.messages import AIMessageChunk
+        from langchain_core.outputs import ChatGenerationChunk
+
+        message = next(self.messages)
+        if isinstance(message, str):
+            message = AIMessage(content=message)
+        if message.tool_calls:
+            chunk = AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    {
+                        "name": tc["name"],
+                        "args": json.dumps(tc["args"]),
+                        "id": tc["id"],
+                        "index": 0,
+                        "type": "tool_call_chunk",
+                    }
+                    for tc in message.tool_calls
+                ],
+            )
+            yield ChatGenerationChunk(message=chunk)
+            return
+        words = str(message.content).split(" ")
+        for position, word in enumerate(words):
+            text = word + (" " if position < len(words) - 1 else "")
+            yield ChatGenerationChunk(message=AIMessageChunk(content=text))
 
 
 def scripted_model(messages: list[AIMessage]) -> BaseChatModel:

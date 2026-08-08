@@ -19,3 +19,6 @@ data/*.duckdb
 
 # os / editors
 .DS_Store
+
+# interim feedback sink (replaced by Postgres in #8)
+data/feedback.jsonl
