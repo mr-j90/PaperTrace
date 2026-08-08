@@ -1,6 +1,27 @@
-.PHONY: check lint type test
+.PHONY: check lint type test up down dev logs ingest reset
 
 check: lint type test  ## all local checks (CI runs these + compose validation)
+
+# --- stack lifecycle ---------------------------------------------------------
+up:  ## build + start the full stack (web :3000, api :8000, prefect :4200, grafana :3001)
+	docker compose up -d --build
+
+down:  ## stop the stack (data volumes survive)
+	docker compose down
+
+dev:  ## infra only (qdrant/postgres/prefect/grafana) — run api+web from source
+	docker compose up -d qdrant postgres prefect grafana
+
+logs:  ## follow logs for the whole stack
+	docker compose logs -f --tail 100
+
+ingest:  ## build the knowledge base (tiny tier by default; FULLTEXT_BUDGET=n to change)
+	PREFECT_API_URL=http://localhost:4200/api \
+	PAPERTRACE_FULLTEXT_BUDGET=$(or $(FULLTEXT_BUDGET),25) \
+	uv run python -m ingest.flow
+
+reset:  ## stop the stack and DELETE ALL DATA VOLUMES (index, db, dashboards)
+	docker compose down -v
 
 lint:
 	uv run ruff check .
