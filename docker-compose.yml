@@ -1,7 +1,18 @@
 # PaperTrace stack — grows ticket by ticket (see SPEC.md §11).
-# Live now: qdrant, postgres, grafana. Arriving later: api (#3), prefect (#4),
+# Live now: api, qdrant, postgres, grafana. Arriving later: prefect (#4),
 # web (#7), langfuse profile (#8).
 services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      PAPERTRACE_QDRANT_URL: http://qdrant:6333
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - hf_cache:/data/hf-cache
+    depends_on:
+      - qdrant
   qdrant:
     image: qdrant/qdrant:v1.12.4
     ports:
@@ -34,3 +45,4 @@ volumes:
   qdrant_data:
   postgres_data:
   grafana_data:
+  hf_cache:
