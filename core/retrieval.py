@@ -5,7 +5,15 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    MatchAny,
+    MatchValue,
+    PointStruct,
+    VectorParams,
+)
 
 from core.embeddings import Embedder
 
@@ -13,6 +21,7 @@ if TYPE_CHECKING:
     from core.config import Settings
 
 ABSTRACT_LAYER = "abstract"
+FULLTEXT_LAYER = "fulltext"
 
 
 @dataclass
@@ -92,8 +101,58 @@ class SemanticIndex:
         self._client.upsert(self._collection, points=points)
         return len(points)
 
-    def count(self) -> int:
-        return self._client.count(self._collection).count
+    def index_chunks(self, arxiv_id: str, title: str, chunks: list[tuple[str, str]]) -> int:
+        """Replace a paper's section chunks: (section_heading, embedded_text) pairs.
+
+        Deletes the paper's existing fulltext points first so a re-parse that yields
+        fewer chunks leaves no orphans.
+        """
+        self._client.delete(
+            self._collection,
+            points_selector=Filter(
+                must=[
+                    FieldCondition(key="arxiv_id", match=MatchValue(value=arxiv_id)),
+                    FieldCondition(key="layer", match=MatchValue(value=FULLTEXT_LAYER)),
+                ]
+            ),
+        )
+        if not chunks:
+            return 0
+        vectors = self._embed([text for _, text in chunks])
+        points = [
+            PointStruct(
+                id=point_id(f"{arxiv_id}:{i}", FULLTEXT_LAYER),
+                vector=vector,
+                payload={
+                    "arxiv_id": arxiv_id,
+                    "title": title,
+                    "text": text,
+                    "layer": FULLTEXT_LAYER,
+                    "section": section,
+                },
+            )
+            for i, ((section, text), vector) in enumerate(zip(chunks, vectors, strict=True))
+        ]
+        self._client.upsert(self._collection, points=points)
+        return len(points)
+
+    def prune_fulltext(self, keep_ids: list[str]) -> None:
+        """Drop fulltext chunks for papers no longer in the tier (idempotent re-runs)."""
+        self._client.delete(
+            self._collection,
+            points_selector=Filter(
+                must=[FieldCondition(key="layer", match=MatchValue(value=FULLTEXT_LAYER))],
+                must_not=[FieldCondition(key="arxiv_id", match=MatchAny(any=keep_ids))],
+            ),
+        )
+
+    def count(self, layer: str | None = None) -> int:
+        if layer is None:
+            return self._client.count(self._collection).count
+        return self._client.count(
+            self._collection,
+            count_filter=Filter(must=[FieldCondition(key="layer", match=MatchValue(value=layer))]),
+        ).count
 
     def search(self, query: str, k: int) -> list[Evidence]:
         [vector] = self._embed([query])

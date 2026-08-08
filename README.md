@@ -135,6 +135,24 @@ uv run python -m ingest.snapshot --limit 50   # quick smoke run (don't commit)
 The harvester respects arXiv's API terms (1 request / 3 s, single connection) and
 fails loudly rather than committing a short corpus.
 
+### Building the knowledge base
+
+One Prefect flow ingests the snapshot end-to-end (normalize → DuckDB → full-text
+tier → section chunks → Qdrant):
+
+```bash
+docker compose up -d qdrant prefect
+PREFECT_API_URL=http://localhost:4200/api \
+PAPERTRACE_FULLTEXT_BUDGET=25 uv run python -m ingest.flow   # minutes; full tier ~2h
+```
+
+Watch the run (and its validation report artifact) at http://localhost:4200.
+`--fulltext-budget N` (or the env var) caps the full-text tier; within the budget,
+half goes to the newest papers and half to the most-cited (Semantic Scholar), so
+the tier stays hybrid at any size. Abstract cards cover every non-withdrawn paper
+(withdrawn ones stay flagged and queryable in DuckDB). Full text is fetched
+politely and never committed (licensing).
+
 ## Rubric map (for reviewers)
 
 | Criterion | Where |

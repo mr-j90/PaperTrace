@@ -11,8 +11,8 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY core/ core/
 COPY api/ api/
 COPY ingest/ ingest/
-# snapshot + queries ship in the image so indexing can run in-container:
-#   docker compose run api uv run --no-sync python -m ingest.index_abstracts
+# snapshot + queries ship in the image so ingestion can run in-container:
+#   docker compose run api uv run --no-sync python -m ingest.flow --fulltext-budget 25
 COPY data/queries.toml data/queries.toml
 COPY data/snapshot/ data/snapshot/
 

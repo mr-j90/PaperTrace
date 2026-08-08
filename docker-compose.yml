@@ -1,13 +1,22 @@
 # PaperTrace stack — grows ticket by ticket (see SPEC.md §11).
-# Live now: api, qdrant, postgres, grafana. Arriving later: prefect (#4),
+# Live now: api, qdrant, postgres, grafana, prefect. Arriving later:
 # web (#7), langfuse profile (#8).
 services:
+  prefect:
+    image: prefecthq/prefect:3.8.2-python3.12  # keep in step with prefect in pyproject
+    command: prefect server start --host 0.0.0.0
+    ports:
+      - "4200:4200"
+    volumes:
+      - prefect_data:/root/.prefect
+
   api:
     build: .
     ports:
       - "8000:8000"
     environment:
       PAPERTRACE_QDRANT_URL: http://qdrant:6333
+      PREFECT_API_URL: http://prefect:4200/api  # in-container flow runs show in the UI
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - hf_cache:/data/hf-cache
@@ -46,3 +55,4 @@ volumes:
   postgres_data:
   grafana_data:
   hf_cache:
+  prefect_data:
