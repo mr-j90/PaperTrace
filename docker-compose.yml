@@ -30,8 +30,10 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       # tracing activates when the observability profile is up (or env overrides)
       LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse-web:3000}
-      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
-      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
+      # defaults match the observability profile's headless-init dev keys, so
+      # tracing works out of the box on `make up`; override for real deploys
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-pk-lf-papertrace-dev}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-sk-lf-papertrace-dev}
     volumes:
       - hf_cache:/data/hf-cache
       # papers.duckdb + feedback.jsonl live on the host; see docs/adr/0001
