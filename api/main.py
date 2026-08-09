@@ -25,6 +25,11 @@ from core.retrieval import SemanticIndex
 from core.tools import make_metadata_query, make_semantic_search
 from core.turnlog import Turn, TurnStore
 
+try:  # optional at runtime — tracing off means no langfuse import needed
+    from langfuse import propagate_attributes
+except Exception:  # pragma: no cover
+    propagate_attributes = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 # UI-selectable models; anything else falls back to the env-configured default.
@@ -38,6 +43,7 @@ CHAT_MODELS = {
 class ChatRequest(BaseModel):
     question: str
     model: str | None = None
+    session_id: str | None = None  # groups a conversation's traces in Langfuse
 
 
 class FeedbackRequest(BaseModel):
@@ -132,14 +138,22 @@ async def chat(request: ChatRequest) -> StreamingResponse:
 
         # An enclosing span pins the Langfuse trace id to our turn_id, so feedback
         # scores attach to the same trace the LangGraph run lands in.
+        tracing = bool(callbacks and app.state.langfuse)
         span = (
             app.state.langfuse.start_as_current_observation(
                 name="papertrace-turn", trace_context={"trace_id": turn_id}
             )
-            if callbacks and app.state.langfuse
+            if tracing
             else nullcontext()
         )
-        with span:
+        session = (
+            propagate_attributes(session_id=request.session_id[:190])
+            if tracing and request.session_id
+            else nullcontext()
+        )
+        with span, session:
+            if tracing:
+                app.state.langfuse.set_current_trace_io(input=request.question)
             async for event in stream_chat(
                 graph, request.question, settings.max_turns, callbacks=callbacks, metadata=metadata
             ):
@@ -151,6 +165,10 @@ async def chat(request: ChatRequest) -> StreamingResponse:
                     state["usage"] = event.get("usage", state["usage"])
                     state["completed"] = True
                     event = {**event, "turn_id": turn_id}
+                    if tracing:
+                        app.state.langfuse.set_current_trace_io(
+                            input=request.question, output=event.get("answer", "")
+                        )
                 yield f"data: {json.dumps(event)}\n\n"
 
     def finalize() -> None:  # sync: Starlette runs it in the threadpool
