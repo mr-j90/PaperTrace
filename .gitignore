@@ -22,3 +22,6 @@ data/*.duckdb
 
 # interim feedback sink (replaced by Postgres in #8)
 data/feedback.jsonl
+
+# eval scratch
+eval/results/.smoke.duckdb

@@ -65,9 +65,12 @@ class MaxTurnsExceeded(Exception):
 
 
 def build_agent(
-    model: BaseChatModel, tools: list[BaseTool], today: str | None = None
+    model: BaseChatModel,
+    tools: list[BaseTool],
+    today: str | None = None,
+    system_prompt: str | None = None,
 ) -> CompiledStateGraph[Any]:
-    prompt = SYSTEM_PROMPT.format(today=today or date.today().isoformat())
+    prompt = (system_prompt or SYSTEM_PROMPT).format(today=today or date.today().isoformat())
     return create_agent(model, tools, system_prompt=prompt)
 
 

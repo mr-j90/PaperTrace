@@ -27,6 +27,9 @@ jobs:
       - name: Tests
         run: make test
 
+      - name: Eval smoke (free, local models)
+        run: uv run python -m eval.smoke
+
       - name: Compose stub validates
         run: docker compose config --quiet
 
