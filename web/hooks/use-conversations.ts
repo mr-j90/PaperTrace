@@ -96,7 +96,7 @@ export function useConversations() {
 
       setBusyId(id);
       try {
-        for await (const event of streamChat(q, model)) {
+        for await (const event of streamChat(q, model, id)) {
           if (event.type === "token") {
             patchLastMessage(id, (m) => ({ ...m, text: m.text + event.text }));
           } else if (event.type === "tool_call") {

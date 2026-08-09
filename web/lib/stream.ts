@@ -4,12 +4,13 @@ import type { StreamEvent } from "@/types/chat";
 export async function* streamChat(
   question: string,
   model?: string,
+  sessionId?: string,
   signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, model }),
+    body: JSON.stringify({ question, model, session_id: sessionId }),
     signal,
   });
   if (!response.ok || !response.body) {
