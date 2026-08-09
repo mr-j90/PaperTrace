@@ -37,6 +37,8 @@ PaperTrace treats it as an **agent problem**: one LLM loop, two grounded tools �
 The agent's whole thought process — rewritten queries, tool calls, evidence, latency —
 streams into the chat as an inline, collapsible **trace** on every answer.
 
+Architecture deep dive: [`docs/metadata-query-agent-graph.md`](docs/metadata-query-agent-graph.md)
+
 ## How it works
 
 ```
