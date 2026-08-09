@@ -12,6 +12,6 @@ datasources:
       sslmode: disable
       postgresVersion: 1600
     secureJsonData:
-      password: ${POSTGRES_PASSWORD:-papertrace}
+      password: $POSTGRES_PASSWORD
     isDefault: true
     editable: false

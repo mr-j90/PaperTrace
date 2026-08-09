@@ -156,7 +156,7 @@
     },
     {
       "id": 6,
-      "title": "Tool-error rate",
+      "title": "Turn-error rate",
       "type": "timeseries",
       "datasource": {
         "type": "postgres",

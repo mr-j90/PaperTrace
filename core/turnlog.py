@@ -12,19 +12,22 @@ import psycopg
 
 logger = logging.getLogger(__name__)
 
-# USD per million tokens (input, output). Verify against anthropic.com/pricing when
-# models change; override per deployment via the settings env if prices move.
+# USD per million tokens (input, output). Verify against anthropic.com/pricing
+# when models change.
 MTOK_PRICES: dict[str, tuple[float, float]] = {
     "claude-haiku-4-5": (1.0, 5.0),
     "claude-sonnet-5": (3.0, 15.0),
-    "claude-opus-5": (15.0, 75.0),
+    "claude-opus-5": (5.0, 25.0),
 }
 
 
 def cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
-    for key, (in_price, out_price) in MTOK_PRICES.items():
+    # longest key first: deterministic when ids share prefixes
+    for key in sorted(MTOK_PRICES, key=len, reverse=True):
         if key in model:
+            in_price, out_price = MTOK_PRICES[key]
             return (input_tokens * in_price + output_tokens * out_price) / 1_000_000
+    logger.warning("no price for model %s — cost recorded as 0", model)
     return 0.0
 
 
@@ -51,7 +54,7 @@ class TurnStore:
                 con.execute(schema)  # type: ignore[arg-type,unused-ignore]
             return True
         except psycopg.Error:
-            logger.warning("monitoring store unavailable — turn logging disabled until it is")
+            logger.warning("monitoring store unavailable — writes will retry per turn")
             return False
 
     def write_turn(self, turn: Turn) -> None:

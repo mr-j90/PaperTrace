@@ -6,7 +6,7 @@ import os
 import time
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, nullcontext
 from pathlib import Path
 from typing import Any, Literal
 
@@ -16,6 +16,7 @@ from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from langchain.chat_models import init_chat_model
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 from core.agent import build_agent, stream_chat
 from core.config import Settings, load_settings
@@ -115,57 +116,82 @@ async def chat(request: ChatRequest) -> StreamingResponse:
     settings: Settings = app.state.settings
     graph, model_spec = resolve_graph(app, request.model)
     turn_id = uuid.uuid4().hex
+    started = time.monotonic()
+    # shared with finalize(): the turn row is written by a BackgroundTask so it
+    # lands even when the client disconnects mid-stream (generator cancelled)
+    state: dict[str, Any] = {
+        "tools": [],
+        "usage": {"input_tokens": 0, "output_tokens": 0},
+        "error": None,
+        "completed": False,
+    }
 
     async def events() -> AsyncIterator[str]:
-        started = time.monotonic()
-        tools_used: list[str] = []
-        usage = {"input_tokens": 0, "output_tokens": 0}
-        error: str | None = None
         callbacks = [app.state.langfuse_handler] if app.state.langfuse_handler else []
-        metadata = {"langfuse_trace_id": turn_id, "langfuse_tags": ["papertrace"]}
+        metadata = {"langfuse_tags": ["papertrace"]}
 
-        async for event in stream_chat(
-            graph, request.question, settings.max_turns, callbacks=callbacks, metadata=metadata
-        ):
-            if event["type"] == "tool_call":
-                tools_used.append(str(event["name"]))
-            elif event["type"] == "error":
-                error = str(event["detail"])
-            elif event["type"] == "done":
-                usage = event.get("usage", usage)
-                event = {**event, "turn_id": turn_id}
-            yield f"data: {json.dumps(event)}\n\n"
-
-        turn = Turn(
-            turn_id=turn_id,
-            question=request.question,
-            model=model_spec,
-            tools_used=sorted(set(tools_used)),
-            latency_ms=round((time.monotonic() - started) * 1000),
-            input_tokens=int(usage.get("input_tokens", 0)),
-            output_tokens=int(usage.get("output_tokens", 0)),
-            error=error,
+        # An enclosing span pins the Langfuse trace id to our turn_id, so feedback
+        # scores attach to the same trace the LangGraph run lands in.
+        span = (
+            app.state.langfuse.start_as_current_observation(
+                name="papertrace-turn", trace_context={"trace_id": turn_id}
+            )
+            if callbacks and app.state.langfuse
+            else nullcontext()
         )
-        await anyio.to_thread.run_sync(app.state.turnstore.write_turn, turn)
+        with span:
+            async for event in stream_chat(
+                graph, request.question, settings.max_turns, callbacks=callbacks, metadata=metadata
+            ):
+                if event["type"] == "tool_call":
+                    state["tools"].append(str(event["name"]))
+                elif event["type"] == "error":
+                    state["error"] = str(event["detail"])
+                elif event["type"] == "done":
+                    state["usage"] = event.get("usage", state["usage"])
+                    state["completed"] = True
+                    event = {**event, "turn_id": turn_id}
+                yield f"data: {json.dumps(event)}\n\n"
+
+    def finalize() -> None:  # sync: Starlette runs it in the threadpool
+        error = state["error"]
+        if error is None and not state["completed"]:
+            error = "client disconnected"
+        app.state.turnstore.write_turn(
+            Turn(
+                turn_id=turn_id,
+                question=request.question,
+                model=model_spec,
+                tools_used=sorted(set(state["tools"])),
+                latency_ms=round((time.monotonic() - started) * 1000),
+                input_tokens=int(state["usage"].get("input_tokens", 0)),
+                output_tokens=int(state["usage"].get("output_tokens", 0)),
+                error=error,
+            )
+        )
 
     return StreamingResponse(
         events(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        background=BackgroundTask(finalize),
     )
 
 
 @app.post("/feedback", status_code=204)
 async def feedback(request: FeedbackRequest) -> None:
     """Dual-write (SPEC §8): Postgres row update + Langfuse score, keyed by turn_id."""
-    if request.turn_id:
-        store: TurnStore = app.state.turnstore
-        matched = await anyio.to_thread.run_sync(
-            store.set_feedback, request.turn_id, request.thumbs, request.comment
-        )
-        if not matched:
-            logger.warning("feedback for unknown turn %s", request.turn_id)
-    if app.state.langfuse and request.turn_id:
+    if not request.turn_id:
+        logger.warning("feedback without turn_id — dropped (client predates turn ledger?)")
+        return
+    store: TurnStore = app.state.turnstore
+    matched = await anyio.to_thread.run_sync(
+        store.set_feedback, request.turn_id, request.thumbs, request.comment
+    )
+    if not matched:
+        logger.warning("feedback for unknown turn %s — skipping Langfuse score", request.turn_id)
+        return
+    if app.state.langfuse:
         try:
             app.state.langfuse.create_score(
                 name="user-feedback",
@@ -173,5 +199,6 @@ async def feedback(request: FeedbackRequest) -> None:
                 value=1 if request.thumbs == "up" else 0,
                 comment=request.comment,
             )
+            await anyio.to_thread.run_sync(app.state.langfuse.flush)
         except Exception:  # scores are best-effort; the Postgres row is the record
             logger.exception("langfuse score failed for turn %s", request.turn_id)
