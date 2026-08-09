@@ -10,9 +10,12 @@ REQUIRED = ("arxiv_id", "title", "abstract", "authors", "categories", "submitted
 _WITHDRAWAL_MARKERS = ("has been withdrawn", "paper is withdrawn", "article is withdrawn")
 
 
-def is_withdrawn(abstract: str) -> bool:
+def is_withdrawn(abstract: str, comment: str | None = None) -> bool:
     head = abstract[:300].lower()
-    return any(marker in head for marker in _WITHDRAWAL_MARKERS)
+    if any(marker in head for marker in _WITHDRAWAL_MARKERS):
+        return True
+    # arXiv puts withdrawal notices in the comment field of the new version
+    return bool(comment) and "withdrawn" in str(comment).lower()
 
 
 def normalize(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -21,8 +24,12 @@ def normalize(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         missing = [f for f in REQUIRED if not record.get(f)]
         if missing:
             raise ValueError(f"record {record.get('arxiv_id', '?')} missing fields: {missing}")
-        record = {**record, "withdrawn": is_withdrawn(str(record["abstract"]))}
+        record = {
+            **record,
+            "withdrawn": is_withdrawn(str(record["abstract"]), record.get("comment")),
+        }
         record.setdefault("doi", None)
+        record.setdefault("comment", None)
         record.setdefault("updated", None)
         record.setdefault("primary_category", None)
         seen[str(record["arxiv_id"])] = record

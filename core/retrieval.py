@@ -197,6 +197,29 @@ class SemanticIndex:
         self._client.upsert(self._collection, points=points)
         return len(points)
 
+    def has_fulltext(self, arxiv_id: str) -> bool:
+        return (
+            self._client.count(
+                self._collection,
+                count_filter=Filter(
+                    must=[
+                        FieldCondition(key="arxiv_id", match=MatchValue(value=arxiv_id)),
+                        FieldCondition(key="layer", match=MatchValue(value=FULLTEXT_LAYER)),
+                    ]
+                ),
+            ).count
+            > 0
+        )
+
+    def remove_paper(self, arxiv_id: str) -> None:
+        """Drop every point (all layers) for a paper — e.g. a withdrawn version."""
+        self._client.delete(
+            self._collection,
+            points_selector=Filter(
+                must=[FieldCondition(key="arxiv_id", match=MatchValue(value=arxiv_id))]
+            ),
+        )
+
     def prune_fulltext(self, keep_ids: list[str]) -> None:
         """Drop fulltext chunks for papers no longer in the tier (idempotent re-runs)."""
         self._client.delete(

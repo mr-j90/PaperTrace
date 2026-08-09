@@ -11,6 +11,25 @@ services:
     depends_on:
       - api
 
+  # First boot: the shared store starts empty — seed it once with
+  #   docker compose run api uv run --no-sync python -m ingest.flow --fulltext-budget 25
+  # (delta runs fail with a clear message until then; the scheduler stays alive).
+  scheduler:
+    build: .
+    command: uv run --no-sync python -m ingest.serve
+    environment:
+      PAPERTRACE_QDRANT_URL: http://qdrant:6333
+      PAPERTRACE_DUCKDB_PATH: data-runtime/papers.duckdb
+      PAPERTRACE_POSTGRES_DSN: postgresql://papertrace:${POSTGRES_PASSWORD:-papertrace}@postgres:5432/papertrace
+      PREFECT_API_URL: http://prefect:4200/api
+    volumes:
+      - hf_cache:/data/hf-cache
+      - papertrace_data:/app/data-runtime  # shared store: delta writes, api reads
+    depends_on:
+      - prefect
+      - qdrant
+      - postgres
+
   prefect:
     image: prefecthq/prefect:3.8.2-python3.12  # keep in step with prefect in pyproject
     command: prefect server start --host 0.0.0.0
@@ -25,6 +44,7 @@ services:
       - "8000:8000"
     environment:
       PAPERTRACE_QDRANT_URL: http://qdrant:6333
+      PAPERTRACE_DUCKDB_PATH: data-runtime/papers.duckdb
       PAPERTRACE_POSTGRES_DSN: postgresql://papertrace:${POSTGRES_PASSWORD:-papertrace}@postgres:5432/papertrace
       PREFECT_API_URL: http://prefect:4200/api  # in-container flow runs show in the UI
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
@@ -160,6 +180,7 @@ services:
       LANGFUSE_INIT_USER_NAME: Dev
 
 volumes:
+  papertrace_data:
   qdrant_data:
   postgres_data:
   grafana_data:

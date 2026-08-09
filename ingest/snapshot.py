@@ -62,6 +62,7 @@ class Paper:
     updated: str  # ISO date of latest version seen
     doi: str | None
     topics: list[str]  # which query topics matched this paper
+    comment: str | None = None  # arXiv comment field; withdrawal notices live here
 
 
 def load_queries(path: Path) -> tuple[Window, list[Topic]]:
@@ -111,6 +112,7 @@ def parse_page(xml_text: str) -> tuple[int, list[Paper]]:
                 updated=_text(entry, "atom:updated"),
                 doi=_text(entry, "arxiv:doi") or None,
                 topics=[],
+                comment=_text(entry, "arxiv:comment") or None,
             )
         )
     return total, papers
@@ -145,7 +147,12 @@ def _get_page(
 
 
 def fetch_topic(
-    client: httpx.Client, topic: Topic, window: Window, limit: int | None
+    client: httpx.Client,
+    topic: Topic,
+    window: Window,
+    limit: int | None,
+    sort_by: str = "submittedDate",
+    sort_order: str = "ascending",
 ) -> tuple[int, list[Paper]]:
     """Fetch a topic's full result set, deduplicated, over stable pagination.
 
@@ -166,8 +173,8 @@ def fetch_topic(
                 "search_query": query,
                 "start": start,
                 "max_results": page_size,
-                "sortBy": "submittedDate",
-                "sortOrder": "ascending",
+                "sortBy": sort_by,
+                "sortOrder": sort_order,
             },
             start,
         )
