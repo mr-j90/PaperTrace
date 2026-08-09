@@ -11,6 +11,7 @@ RUN uv sync --locked --no-dev --no-install-project
 COPY core/ core/
 COPY api/ api/
 COPY ingest/ ingest/
+COPY monitoring/schema.sql monitoring/schema.sql
 # snapshot + queries ship in the image so ingestion can run in-container:
 #   docker compose run api uv run --no-sync python -m ingest.flow --fulltext-budget 25
 COPY data/queries.toml data/queries.toml
