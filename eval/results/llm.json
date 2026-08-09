@@ -1,0 +1,36 @@
+{
+  "ran": "2026-08-09T18:31:08+00:00",
+  "judge": "anthropic:claude-sonnet-5",
+  "judge_caveat": "judge shares a model family with graded answers; spot-check judgments.jsonl",
+  "cells": {
+    "citation_strict/haiku": {
+      "n": 30,
+      "faithfulness": 2.8,
+      "citation_correctness": 2.767,
+      "completeness": 3.533,
+      "mean": 3.033
+    },
+    "citation_strict/sonnet": {
+      "n": 30,
+      "faithfulness": 2.933,
+      "citation_correctness": 2.9,
+      "completeness": 3.567,
+      "mean": 3.133
+    },
+    "baseline/haiku": {
+      "n": 30,
+      "faithfulness": 2.3,
+      "citation_correctness": 2.3,
+      "completeness": 3.333,
+      "mean": 2.644
+    },
+    "baseline/sonnet": {
+      "n": 30,
+      "faithfulness": 2.8,
+      "citation_correctness": 2.867,
+      "completeness": 3.633,
+      "mean": 3.1
+    }
+  },
+  "best_cell": "citation_strict/sonnet"
+}
