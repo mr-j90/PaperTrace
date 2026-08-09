@@ -62,7 +62,8 @@ def main() -> None:
         print(f"  running {mode}...")
         ladder.append(evaluate(index, questions, mode))
 
-    best = max(ladder, key=lambda r: (r["mrr"], r[f"hit_rate@{K}"]))
+    # hit-rate leads: all top-k evidence reaches the agent, so recall is binding; MRR breaks ties
+    best = max(ladder, key=lambda r: (r[f"hit_rate@{K}"], r["mrr"]))
     payload = {
         "ran": datetime.now(UTC).isoformat(timespec="seconds"),
         "k": K,

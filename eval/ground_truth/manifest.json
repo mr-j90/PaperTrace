@@ -9,5 +9,10 @@
     "analytical": 25,
     "freshness": 10
   },
-  "hand_check": "pending"
+  "hand_check": {
+    "status": "passed",
+    "by": "Jordan Taylor",
+    "date": "2026-08-09",
+    "sample": "6 retrieval + 3 synthesis reviewed in-session"
+  }
 }

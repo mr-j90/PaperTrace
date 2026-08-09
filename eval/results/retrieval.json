@@ -1,0 +1,31 @@
+{
+  "ran": "2026-08-09T16:54:55+00:00",
+  "k": 8,
+  "ladder": [
+    {
+      "mode": "sparse",
+      "n": 140,
+      "hit_rate@8": 0.8643,
+      "mrr": 0.7395
+    },
+    {
+      "mode": "dense",
+      "n": 140,
+      "hit_rate@8": 0.7214,
+      "mrr": 0.5518
+    },
+    {
+      "mode": "hybrid",
+      "n": 140,
+      "hit_rate@8": 0.8571,
+      "mrr": 0.7538
+    },
+    {
+      "mode": "hybrid_rerank",
+      "n": 140,
+      "hit_rate@8": 0.8929,
+      "mrr": 0.7491
+    }
+  ],
+  "best_mode": "hybrid_rerank"
+}

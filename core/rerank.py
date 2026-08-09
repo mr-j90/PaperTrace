@@ -14,7 +14,7 @@ def load_reranker(model_name: str) -> Reranker:
     """Load a cross-encoder lazily so tests never import torch."""
     from sentence_transformers import CrossEncoder
 
-    model = CrossEncoder(model_name)
+    model = CrossEncoder(model_name, device="cpu")  # see embeddings.py: MPS + threads segfault
 
     def rerank(query: str, texts: list[str]) -> list[float]:
         if not texts:
