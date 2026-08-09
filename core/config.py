@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     search_k: int = 8
     max_turns: int = 10  # model turns in the evidence loop before giving up
     duckdb_path: str = "data/papers.duckdb"
+    postgres_dsn: str = "postgresql://papertrace:papertrace@localhost:5432/papertrace"
     fulltext_budget: int = 2000  # SPEC §4: hybrid tier size; tiny values for quick runs
     s2_api_key: str | None = None  # Semantic Scholar; optional, unauthenticated works
 

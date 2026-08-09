@@ -16,6 +16,7 @@ from typing import Any
 from langchain.agents import create_agent
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.errors import GraphRecursionError
 from langgraph.graph.state import CompiledStateGraph
@@ -103,7 +104,11 @@ def _ground_citations(answer: str, evidence: dict[str, str]) -> list[Citation]:
 
 
 async def stream_chat(
-    graph: CompiledStateGraph[Any], question: str, max_turns: int
+    graph: CompiledStateGraph[Any],
+    question: str,
+    max_turns: int,
+    callbacks: list[Any] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """The Trace as data (SPEC §7): tool calls, evidence, tokens, then the grounded answer.
 
@@ -113,10 +118,16 @@ async def stream_chat(
     tool_payloads: list[str] = []
     answer_parts: list[str] = []
     tool_started: dict[str, float] = {}  # run_id -> monotonic start, for Trace latency
+    usage = {"input_tokens": 0, "output_tokens": 0}
     try:
+        config: RunnableConfig = {"recursion_limit": 2 * max_turns + 1}
+        if callbacks:
+            config["callbacks"] = callbacks
+        if metadata:
+            config["metadata"] = metadata
         async for event in graph.astream_events(
             {"messages": [("user", question)]},
-            config={"recursion_limit": 2 * max_turns + 1},
+            config=config,
             version="v2",
         ):
             kind = event["event"]
@@ -144,6 +155,10 @@ async def stream_chat(
                     "summary": _summarize_tool_payload(str(content)),
                     "ms": round((time.monotonic() - started) * 1000) if started else None,
                 }
+            elif kind == "on_chat_model_end":
+                turn_usage = getattr(event["data"].get("output"), "usage_metadata", None) or {}
+                usage["input_tokens"] += int(turn_usage.get("input_tokens", 0))
+                usage["output_tokens"] += int(turn_usage.get("output_tokens", 0))
     except GraphRecursionError:
         yield {"type": "error", "detail": f"no answer within {max_turns} turns"}
         return
@@ -158,6 +173,7 @@ async def stream_chat(
         "type": "done",
         "answer": answer,
         "citations": [asdict(c) for c in citations],
+        "usage": usage,
     }
 
 

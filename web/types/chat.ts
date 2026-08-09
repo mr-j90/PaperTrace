@@ -17,7 +17,7 @@ export type StreamEvent =
   | { type: "token"; text: string }
   | { type: "tool_call"; name: string; args: Record<string, unknown> }
   | { type: "tool_result"; name: string; summary: ToolSummary; ms?: number | null }
-  | { type: "done"; answer: string; citations: Citation[] }
+  | { type: "done"; answer: string; citations: Citation[]; turn_id?: string }
   | { type: "error"; detail: string };
 
 export type TraceStep = {
@@ -29,6 +29,7 @@ export type TraceStep = {
 
 export type AssistantMessage = {
   role: "assistant";
+  turnId?: string;
   text: string;
   citations: Citation[];
   trace: TraceStep[];

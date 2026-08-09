@@ -116,6 +116,7 @@ export function useConversations() {
           } else if (event.type === "done") {
             patchLastMessage(id, (m) => ({
               ...m,
+              turnId: event.turn_id,
               text: event.answer,
               citations: event.citations,
               streaming: false,

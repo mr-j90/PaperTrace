@@ -1,0 +1,216 @@
+{
+  "uid": "papertrace",
+  "title": "PaperTrace",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Query volume",
+      "type": "timeseries",
+      "datasource": {
+        "type": "postgres",
+        "uid": "papertrace-pg"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT $__timeGroup(ts, '1h') AS time, count(*) AS queries FROM turns WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 2,
+      "title": "Latency p50 / p95 (ms)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "postgres",
+        "uid": "papertrace-pg"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT $__timeGroup(ts, '1h') AS time, percentile_cont(0.5) WITHIN GROUP (ORDER BY latency_ms) AS p50, percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95 FROM turns WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 3,
+      "title": "Route split",
+      "type": "piechart",
+      "datasource": {
+        "type": "postgres",
+        "uid": "papertrace-pg"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT CASE WHEN 'semantic_search' = ANY(tools_used) AND 'metadata_query' = ANY(tools_used) THEN 'both' WHEN 'semantic_search' = ANY(tools_used) THEN 'semantic' WHEN 'metadata_query' = ANY(tools_used) THEN 'metadata' ELSE 'no tool' END AS route, count(*) AS n FROM turns WHERE $__timeFilter(ts) GROUP BY 1",
+          "format": "table",
+          "rawQuery": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 4,
+      "title": "Feedback rate",
+      "type": "timeseries",
+      "datasource": {
+        "type": "postgres",
+        "uid": "papertrace-pg"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT $__timeGroup(ts, '1d') AS time, count(*) FILTER (WHERE feedback = 'up')::float AS thumbs_up, count(*) FILTER (WHERE feedback = 'down')::float AS thumbs_down, count(*) FILTER (WHERE feedback IS NOT NULL)::float / greatest(count(*), 1) AS rate FROM turns WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 5,
+      "title": "Cost per day (USD)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "postgres",
+        "uid": "papertrace-pg"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 16
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT $__timeGroup(ts, '1d') AS time, sum(cost_usd) AS cost FROM turns WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 6,
+      "title": "Turn-error rate",
+      "type": "timeseries",
+      "datasource": {
+        "type": "postgres",
+        "uid": "papertrace-pg"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 16
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT $__timeGroup(ts, '1h') AS time, count(*) FILTER (WHERE error IS NOT NULL)::float / greatest(count(*), 1) AS error_rate FROM turns WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "options": {}
+    },
+    {
+      "id": 7,
+      "title": "Tokens per day",
+      "type": "timeseries",
+      "datasource": {
+        "type": "postgres",
+        "uid": "papertrace-pg"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 24
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT $__timeGroup(ts, '1d') AS time, sum(input_tokens) AS input, sum(output_tokens) AS output FROM turns WHERE $__timeFilter(ts) GROUP BY 1 ORDER BY 1",
+          "format": "time_series",
+          "rawQuery": true
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "options": {}
+    }
+  ]
+}

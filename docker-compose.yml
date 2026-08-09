@@ -25,8 +25,13 @@ services:
       - "8000:8000"
     environment:
       PAPERTRACE_QDRANT_URL: http://qdrant:6333
+      PAPERTRACE_POSTGRES_DSN: postgresql://papertrace:${POSTGRES_PASSWORD:-papertrace}@postgres:5432/papertrace
       PREFECT_API_URL: http://prefect:4200/api  # in-container flow runs show in the UI
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # tracing activates when the observability profile is up (or env overrides)
+      LANGFUSE_HOST: ${LANGFUSE_HOST:-http://langfuse-web:3000}
+      LANGFUSE_PUBLIC_KEY: ${LANGFUSE_PUBLIC_KEY:-}
+      LANGFUSE_SECRET_KEY: ${LANGFUSE_SECRET_KEY:-}
     volumes:
       - hf_cache:/data/hf-cache
       # papers.duckdb + feedback.jsonl live on the host; see docs/adr/0001
@@ -58,8 +63,98 @@ services:
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-papertrace}
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - postgres
+
+  # --- observability profile (SPEC §8): self-hosted Langfuse v3 -------------
+  # Dev-grade inline secrets: local use only — the Fly deploy (#11) overrides.
+  # Bring up with: docker compose --profile observability up -d
+  langfuse-db:
+    image: postgres:16-alpine
+    profiles: ["observability"]
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse_db_data:/var/lib/postgresql/data
+
+  langfuse-clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    profiles: ["observability"]
+    environment:
+      CLICKHOUSE_DB: default
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - langfuse_clickhouse_data:/var/lib/clickhouse
+
+  langfuse-redis:
+    image: redis:7-alpine
+    profiles: ["observability"]
+    command: redis-server --requirepass langfuse
+
+  langfuse-minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    profiles: ["observability"]
+    # pre-creating the directory pre-creates the bucket
+    entrypoint: sh -c 'mkdir -p /data/langfuse && minio server /data --address ":9000"'
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: miniosecret
+    volumes:
+      - langfuse_minio_data:/data
+
+  langfuse-worker:
+    image: langfuse/langfuse-worker:3
+    profiles: ["observability"]
+    depends_on: [langfuse-db, langfuse-clickhouse, langfuse-redis, langfuse-minio]
+    environment: &langfuse-env
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      SALT: papertrace-dev-salt
+      ENCRYPTION_KEY: 5f4dcc3b5aa765d61d8327deb882cf995f4dcc3b5aa765d61d8327deb882cf99
+      TELEMETRY_ENABLED: "false"
+      CLICKHOUSE_URL: http://langfuse-clickhouse:8123
+      CLICKHOUSE_MIGRATION_URL: clickhouse://langfuse-clickhouse:9000
+      CLICKHOUSE_USER: clickhouse
+      CLICKHOUSE_PASSWORD: clickhouse
+      CLICKHOUSE_CLUSTER_ENABLED: "false"
+      REDIS_HOST: langfuse-redis
+      REDIS_AUTH: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+      LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+      LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: minio
+      LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: miniosecret
+      LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://langfuse-minio:9000
+      LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+
+  langfuse-web:
+    image: langfuse/langfuse:3
+    profiles: ["observability"]
+    ports:
+      - "3002:3000"
+    depends_on: [langfuse-db, langfuse-clickhouse, langfuse-redis, langfuse-minio]
+    environment:
+      <<: *langfuse-env
+      NEXTAUTH_SECRET: papertrace-dev-secret
+      NEXTAUTH_URL: http://localhost:3002
+      # headless init: the API's keys exist without onboarding clicks
+      LANGFUSE_INIT_ORG_ID: papertrace
+      LANGFUSE_INIT_PROJECT_ID: papertrace
+      LANGFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-papertrace-dev
+      LANGFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-papertrace-dev
+      LANGFUSE_INIT_USER_EMAIL: dev@papertrace.local
+      LANGFUSE_INIT_USER_PASSWORD: papertrace123
+      LANGFUSE_INIT_USER_NAME: Dev
 
 volumes:
   qdrant_data:
@@ -67,3 +162,6 @@ volumes:
   grafana_data:
   hf_cache:
   prefect_data:
+  langfuse_db_data:
+  langfuse_clickhouse_data:
+  langfuse_minio_data:

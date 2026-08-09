@@ -65,6 +65,7 @@ function Feedback({
         answer: message.text,
         thumbs: pending,
         comment: comment.trim() || null,
+        turn_id: message.turnId ?? null,
       }),
     }).catch(() => null);
     if (response?.ok) {

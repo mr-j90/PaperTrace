@@ -1,7 +1,6 @@
-"""API contract: SSE trace events, grounded final answer, feedback capture."""
+"""API contract: SSE trace events, grounded final answer, turn ledger, feedback dual-write."""
 
 import json
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -43,14 +42,37 @@ def looping_model() -> object:
     return scripted_model(endless)
 
 
+class FakeTurnStore:
+    def __init__(self) -> None:
+        self.turns: list[Any] = []
+        self.feedback: list[tuple[str, str, str | None]] = []
+
+    def write_turn(self, turn: Any) -> None:  # noqa: ANN401
+        self.turns.append(turn)
+
+    def set_feedback(self, turn_id: str, thumbs: str, comment: str | None) -> bool:
+        self.feedback.append((turn_id, thumbs, comment))
+        return True
+
+
+def wire_fakes(
+    monkeypatch: pytest.MonkeyPatch, model_factory: Any = answering_model, **settings: Any
+) -> FakeTurnStore:
+    store = FakeTurnStore()
+    monkeypatch.setattr(api_main, "build_tools", lambda s: fake_tools())
+    monkeypatch.setattr(api_main, "init_chat_model", lambda spec: model_factory())
+    monkeypatch.setattr(api_main, "build_turnstore", lambda s: store)
+    monkeypatch.setattr(api_main, "build_langfuse", lambda: (None, None))
+    monkeypatch.setattr(api_main, "load_settings", lambda: Settings(**settings))
+    return store
+
+
 def sse_events(text: str) -> list[dict[str, Any]]:
     return [json.loads(line[6:]) for line in text.splitlines() if line.startswith("data: ")]
 
 
 def test_chat_streams_trace_then_grounded_answer(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(api_main, "build_tools", lambda settings: fake_tools())
-    monkeypatch.setattr(api_main, "init_chat_model", lambda spec: answering_model())
-    monkeypatch.setattr(api_main, "load_settings", lambda: Settings())
+    store = wire_fakes(monkeypatch)
 
     with TestClient(api_main.app) as client:
         assert client.get("/healthz").json() == {"status": "ok"}
@@ -78,12 +100,18 @@ def test_chat_streams_trace_then_grounded_answer(monkeypatch: pytest.MonkeyPatch
             "url": "https://arxiv.org/abs/2005.11401",
         }
     ]
+    assert done["turn_id"]
+    assert done["usage"] == {"input_tokens": 0, "output_tokens": 0}  # fake model: no usage
+
+    [turn] = store.turns  # one Postgres row per turn
+    assert turn.turn_id == done["turn_id"]
+    assert turn.tools_used == ["semantic_search"]
+    assert turn.latency_ms >= 0
+    assert turn.error is None
 
 
 def test_chat_stream_emits_error_on_max_turns(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(api_main, "build_tools", lambda settings: fake_tools())
-    monkeypatch.setattr(api_main, "init_chat_model", lambda spec: looping_model())
-    monkeypatch.setattr(api_main, "load_settings", lambda: Settings(max_turns=3))
+    store = wire_fakes(monkeypatch, looping_model, max_turns=3)
 
     with (
         TestClient(api_main.app) as client,
@@ -93,6 +121,8 @@ def test_chat_stream_emits_error_on_max_turns(monkeypatch: pytest.MonkeyPatch) -
 
     assert events[-1]["type"] == "error"
     assert "turns" in events[-1]["detail"]
+    [turn] = store.turns  # failed turns are logged too, with the error recorded
+    assert turn.error is not None
 
 
 def test_chat_model_override_selects_allowed_model(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -102,9 +132,8 @@ def test_chat_model_override_selects_allowed_model(monkeypatch: pytest.MonkeyPat
         specs.append(spec)
         return answering_model()
 
-    monkeypatch.setattr(api_main, "build_tools", lambda settings: fake_tools())
+    wire_fakes(monkeypatch)
     monkeypatch.setattr(api_main, "init_chat_model", tracking_init)
-    monkeypatch.setattr(api_main, "load_settings", lambda: Settings())
 
     with TestClient(api_main.app) as client:
         client.post("/chat", json={"question": "q", "model": "claude-sonnet-5"}).read()
@@ -113,19 +142,20 @@ def test_chat_model_override_selects_allowed_model(monkeypatch: pytest.MonkeyPat
     assert specs == ["anthropic:claude-sonnet-5", "anthropic:claude-haiku-4-5"]
 
 
-def test_feedback_appends_jsonl(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setattr(api_main, "build_tools", lambda settings: fake_tools())
-    monkeypatch.setattr(api_main, "init_chat_model", lambda spec: answering_model())
-    monkeypatch.setattr(api_main, "load_settings", lambda: Settings())
-    monkeypatch.setattr(api_main, "FEEDBACK_PATH", tmp_path / "feedback.jsonl")
+def test_feedback_dual_write_updates_turn_row(monkeypatch: pytest.MonkeyPatch) -> None:
+    store = wire_fakes(monkeypatch)
 
     with TestClient(api_main.app) as client:
         response = client.post(
             "/feedback",
-            json={"question": "q", "answer": "a", "thumbs": "up", "comment": "nice"},
+            json={
+                "question": "q",
+                "answer": "a",
+                "thumbs": "up",
+                "comment": "nice",
+                "turn_id": "t123",
+            },
         )
         assert response.status_code == 204
 
-    [line] = (tmp_path / "feedback.jsonl").read_text().splitlines()
-    record = json.loads(line)
-    assert record["thumbs"] == "up" and record["comment"] == "nice" and record["ts"]
+    assert store.feedback == [("t123", "up", "nice")]
