@@ -1,12 +1,16 @@
-"""PaperTrace API (SPEC §7): SSE chat streaming the Trace, feedback capture, health."""
+"""PaperTrace API (SPEC §7/§8): SSE chat streaming the Trace, dual-write monitoring, health."""
 
 import json
-from collections.abc import AsyncIterator
+import logging
+import os
+import time
+import uuid
+from collections.abc import AsyncGenerator, AsyncIterator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+import anyio
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
@@ -18,6 +22,9 @@ from core.config import Settings, load_settings
 from core.metadata import MetadataStore
 from core.retrieval import SemanticIndex
 from core.tools import make_metadata_query, make_semantic_search
+from core.turnlog import Turn, TurnStore
+
+logger = logging.getLogger(__name__)
 
 # UI-selectable models; anything else falls back to the env-configured default.
 CHAT_MODELS = {
@@ -37,6 +44,7 @@ class FeedbackRequest(BaseModel):
     answer: str
     thumbs: Literal["up", "down"]
     comment: str | None = None
+    turn_id: str | None = None
 
 
 def build_tools(settings: Settings) -> list[Any]:
@@ -45,18 +53,38 @@ def build_tools(settings: Settings) -> list[Any]:
     return [make_semantic_search(index, settings.search_k), make_metadata_query(store)]
 
 
-def resolve_graph(app: FastAPI, model_id: str | None) -> Any:
+def resolve_graph(app: FastAPI, model_id: str | None) -> tuple[Any, str]:
     """One compiled agent graph per chat model, built on first use; tools are shared."""
     settings: Settings = app.state.settings
     spec = CHAT_MODELS.get(model_id or "", settings.chat_model)
     graphs: dict[str, Any] = app.state.graphs
     if spec not in graphs:
         graphs[spec] = build_agent(init_chat_model(spec), app.state.tools)
-    return graphs[spec]
+    return graphs[spec], spec
+
+
+def build_turnstore(settings: Settings) -> TurnStore:
+    store = TurnStore(settings.postgres_dsn)
+    store.ensure_schema()
+    return store
+
+
+def build_langfuse() -> tuple[Any | None, Any | None]:
+    """(callback_handler, client) when LANGFUSE_* env is configured; (None, None) otherwise."""
+    if not os.environ.get("LANGFUSE_PUBLIC_KEY"):
+        return None, None
+    try:
+        from langfuse import get_client
+        from langfuse.langchain import CallbackHandler
+
+        return CallbackHandler(), get_client()
+    except Exception:  # tracing must never take the chat path down
+        logger.exception("langfuse configured but unusable — tracing disabled")
+        return None, None
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Provider SDKs read credentials from the process env; pydantic-settings only
     # loads its own PAPERTRACE_* fields, so surface .env for local runs too.
     load_dotenv()
@@ -67,12 +95,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.settings = settings
     app.state.tools = build_tools(settings)
     app.state.graphs = {}
+    app.state.turnstore = build_turnstore(settings)
+    app.state.langfuse_handler, app.state.langfuse = build_langfuse()
     yield
 
 
 app = FastAPI(title="PaperTrace", lifespan=lifespan)
-
-FEEDBACK_PATH = Path("data/feedback.jsonl")  # interim sink; #8 dual-writes Postgres+Langfuse
 
 
 @app.get("/healthz")
@@ -82,15 +110,43 @@ def healthz() -> dict[str, str]:
 
 @app.post("/chat")
 async def chat(request: ChatRequest) -> StreamingResponse:
-    """Stream the evidence loop as Server-Sent Events; final event carries the
-    grounded answer + citations. Event types: tool_call, tool_result, token,
-    done, error."""
+    """Stream the evidence loop as Server-Sent Events; the final `done` event carries
+    the grounded answer, citations, usage, and the turn_id feedback refers to."""
     settings: Settings = app.state.settings
-    graph = resolve_graph(app, request.model)
+    graph, model_spec = resolve_graph(app, request.model)
+    turn_id = uuid.uuid4().hex
 
     async def events() -> AsyncIterator[str]:
-        async for event in stream_chat(graph, request.question, settings.max_turns):
+        started = time.monotonic()
+        tools_used: list[str] = []
+        usage = {"input_tokens": 0, "output_tokens": 0}
+        error: str | None = None
+        callbacks = [app.state.langfuse_handler] if app.state.langfuse_handler else []
+        metadata = {"langfuse_trace_id": turn_id, "langfuse_tags": ["papertrace"]}
+
+        async for event in stream_chat(
+            graph, request.question, settings.max_turns, callbacks=callbacks, metadata=metadata
+        ):
+            if event["type"] == "tool_call":
+                tools_used.append(str(event["name"]))
+            elif event["type"] == "error":
+                error = str(event["detail"])
+            elif event["type"] == "done":
+                usage = event.get("usage", usage)
+                event = {**event, "turn_id": turn_id}
             yield f"data: {json.dumps(event)}\n\n"
+
+        turn = Turn(
+            turn_id=turn_id,
+            question=request.question,
+            model=model_spec,
+            tools_used=sorted(set(tools_used)),
+            latency_ms=round((time.monotonic() - started) * 1000),
+            input_tokens=int(usage.get("input_tokens", 0)),
+            output_tokens=int(usage.get("output_tokens", 0)),
+            error=error,
+        )
+        await anyio.to_thread.run_sync(app.state.turnstore.write_turn, turn)
 
     return StreamingResponse(
         events(),
@@ -100,11 +156,22 @@ async def chat(request: ChatRequest) -> StreamingResponse:
 
 
 @app.post("/feedback", status_code=204)
-def feedback(request: FeedbackRequest) -> None:
-    record = {
-        "ts": datetime.now(UTC).isoformat(),
-        **request.model_dump(),
-    }
-    FEEDBACK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with FEEDBACK_PATH.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+async def feedback(request: FeedbackRequest) -> None:
+    """Dual-write (SPEC §8): Postgres row update + Langfuse score, keyed by turn_id."""
+    if request.turn_id:
+        store: TurnStore = app.state.turnstore
+        matched = await anyio.to_thread.run_sync(
+            store.set_feedback, request.turn_id, request.thumbs, request.comment
+        )
+        if not matched:
+            logger.warning("feedback for unknown turn %s", request.turn_id)
+    if app.state.langfuse and request.turn_id:
+        try:
+            app.state.langfuse.create_score(
+                name="user-feedback",
+                trace_id=request.turn_id,
+                value=1 if request.thumbs == "up" else 0,
+                comment=request.comment,
+            )
+        except Exception:  # scores are best-effort; the Postgres row is the record
+            logger.exception("langfuse score failed for turn %s", request.turn_id)
