@@ -76,9 +76,9 @@ eval as a first-class deliverable — **[read the current report](eval/results/r
 
 | Layer | What's measured |
 |---|---|
-| Retrieval | 4-way ladder — BM25 → dense → hybrid → hybrid+re-rank — **0.893 hit-rate@8** for the shipped hybrid+rerank (+17pts over dense-only) on 140 pinned questions |
+| Retrieval | 4-way ladder — BM25 → dense → hybrid → hybrid+re-rank — **0.893 hit-rate@8** for the shipped hybrid+rerank (dense-only 0.72, BM25 0.86, hybrid 0.86) on 140 pinned questions |
 | Answers | 2 prompts × 2 models, LLM-as-judge (faithfulness, citation correctness, completeness) + hand spot-checks |
-| Agent | **0.995 routing accuracy** across 200 questions; tool-arg exact match 0.74; execution accuracy 0.80 |
+| Agent | **0.995 routing accuracy** across 200 questions; tool-arg match **1.0**; execution accuracy **1.0** |
 | CI | A free smoke slice runs on every push and fails on regression |
 
 Ground truth: ~200 LLM-generated, hand-checked questions pinned to the corpus snapshot,

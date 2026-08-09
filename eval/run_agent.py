@@ -44,7 +44,8 @@ async def run_question(
 
 
 def args_match(expected: dict[str, Any], calls: list[dict[str, Any]]) -> bool:
-    """Expected keys must appear with exactly these values in some metadata_query call."""
+    """Expected keys must appear with exactly these values in some metadata_query call
+    (subset semantics: the model may legitimately add sort/limit/extras)."""
     for call in calls:
         if call["name"] != "metadata_query":
             continue
@@ -105,7 +106,7 @@ async def main_async() -> None:
         "model": settings.chat_model,
         "per_set": per_set,
         "routing_accuracy": round(routing_ok / routing_total, 4),
-        "tool_arg_match": round(arg_ok / arg_total, 4) if arg_total else None,
+        "tool_arg_match_subset": round(arg_ok / arg_total, 4) if arg_total else None,
         "execution_accuracy": round(exec_ok / exec_total, 4) if exec_total else None,
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)

@@ -23,7 +23,7 @@ from ingest.store import load_papers
 
 N_QUESTIONS = 30
 N_DISTRACTORS = 300
-THRESHOLDS = {"hybrid_hit": 0.55, "hybrid_beats_or_ties_worst": True, "execution": 1.0}
+THRESHOLDS = {"hybrid_hit": 0.8, "hybrid_beats_or_ties_worst": True, "execution": 1.0}
 
 
 def retrieval_smoke() -> bool:
@@ -67,6 +67,9 @@ def retrieval_smoke() -> bool:
     ok = rates["hybrid"] >= THRESHOLDS["hybrid_hit"]
     if not ok:
         print(f"FAIL: hybrid hit-rate {rates['hybrid']} < {THRESHOLDS['hybrid_hit']}")
+    if THRESHOLDS["hybrid_beats_or_ties_worst"] and rates["hybrid"] < min(rates.values()):
+        print("FAIL: hybrid ranks below a single-vector mode — fusion regressed")
+        ok = False
     return ok
 
 

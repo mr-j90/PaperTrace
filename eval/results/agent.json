@@ -1,5 +1,5 @@
 {
-  "ran": "2026-08-09T18:38:07+00:00",
+  "ran": "2026-08-09T20:14:04+00:00",
   "model": "anthropic:claude-haiku-4-5",
   "per_set": {
     "retrieval": {
@@ -20,6 +20,6 @@
     }
   },
   "routing_accuracy": 0.995,
-  "tool_arg_match": 0.7429,
-  "execution_accuracy": 0.8
+  "tool_arg_match_subset": 1.0,
+  "execution_accuracy": 1.0
 }

@@ -36,8 +36,6 @@ jobs:
 
       - name: Build index from the committed snapshot (abstracts only)
         run: uv run python -m ingest.flow --fulltext-budget 0
-        env:
-          PREFECT_API_URL: ""
 
       - name: Retrieval ladder (free, local models)
         run: uv run python -m eval.run_retrieval

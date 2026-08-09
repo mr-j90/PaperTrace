@@ -34,7 +34,9 @@ def main() -> None:
         parts.append(f"## Agent metrics ({data['model']})\n")
         per_set = ", ".join(f"{k} {v['routing_accuracy']}" for k, v in data["per_set"].items())
         parts.append(f"- routing accuracy: **{data['routing_accuracy']}** ({per_set})")
-        parts.append(f"- tool-arg exact match: **{data['tool_arg_match']}**")
+        parts.append(
+            f"- tool-arg match (expected keys ⊆ called args): **{data['tool_arg_match_subset']}**"
+        )
         parts.append(f"- execution accuracy: **{data['execution_accuracy']}**\n")
 
     llm = RESULTS / "llm.json"
@@ -45,11 +47,16 @@ def main() -> None:
             "| cell | faithfulness | citations | completeness | mean |\n|---|---|---|---|---|"
         )
         for cell, s in data["cells"].items():
-            marker = " **(shipped)**" if cell == data["best_cell"] else ""
+            marker = " **(best)**" if cell == data["best_cell"] else ""
             parts.append(
                 f"| {cell}{marker} | {s['faithfulness']} | {s['citation_correctness']} "
                 f"| {s['completeness']} | {s['mean']} |"
             )
+        parts.append(
+            "\nThe citation-strict prompt ships as the production system prompt. The model"
+            " default stays on the SPEC §5 tiering (Haiku for dev, Sonnet for demo/final"
+            " runs) — the grid validates that tiering rather than replacing it."
+        )
         parts.append(f"\n> {data['judge_caveat']}\n")
 
     Path("eval/results/report.md").write_text("\n".join(parts) + "\n")

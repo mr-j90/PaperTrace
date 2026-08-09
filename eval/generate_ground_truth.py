@@ -151,10 +151,12 @@ def templated_questions(
         if kind == 0:
             month = rng.choice(months)
             first = f"{month}-01"
-            nxt = (datetime.fromisoformat(first) + timedelta(days=31)).strftime("%Y-%m-01")
+            # submitted_to is inclusive of the whole end day — use the month's last day
+            next_first = datetime.fromisoformat(first) + timedelta(days=31)
+            last_day = (next_first.replace(day=1) - timedelta(days=1)).strftime("%Y-%m-%d")
             add(
                 f"How many {topic} papers were submitted in {month}?",
-                {"topic": topic, "submitted_from": first, "submitted_to": nxt},
+                {"topic": topic, "submitted_from": first, "submitted_to": last_day},
             )
         elif kind == 1:
             year = rng.choice(["2023", "2024", "2025"])
@@ -218,26 +220,31 @@ def main() -> None:
         ("analytical", analytical),
         ("freshness", freshness),
     ]:
+        if not rows:  # requested 0: leave the committed set untouched
+            print(f"  skipped {name}.jsonl (0 requested)")
+            continue
         with (out / f"{name}.jsonl").open("w", encoding="utf-8") as fh:
             for row in rows:
                 fh.write(json.dumps(row, ensure_ascii=False) + "\n")
         print(f"  wrote {name}.jsonl ({len(rows)})")
 
+    previous = Path("eval/ground_truth/manifest.json")
+    hand_check: Any = "pending"
+    if previous.exists():
+        hand_check = json.loads(previous.read_text()).get("hand_check", "pending")
     manifest = {
         "generated": datetime.now(UTC).date().isoformat(),
         "snapshot_window_end": window_end,
         "generator_model": GENERATOR_MODEL,
         "seed": SEED,
         "counts": {
-            "retrieval": len(retrieval),
-            "synthesis": len(synthesis),
-            "analytical": len(analytical),
-            "freshness": len(freshness),
+            name: len((out / f"{name}.jsonl").read_text().splitlines())
+            for name in ("retrieval", "synthesis", "analytical", "freshness")
         },
-        "hand_check": "pending",
+        "hand_check": hand_check,
     }
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print("manifest written (hand_check: pending)")
+    print("manifest written (hand_check: " + str(manifest["hand_check"]) + ")")
 
 
 if __name__ == "__main__":
