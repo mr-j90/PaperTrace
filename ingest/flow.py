@@ -65,6 +65,8 @@ def load_metadata_store(records: list[dict[str, Any]]) -> int:
 
 @task
 def select_fulltext_tier(records: list[dict[str, Any]], budget: int, window_end: date) -> list[str]:
+    if budget <= 0:  # abstracts-only build (e.g. CI): skip the S2 round-trips entirely
+        return []
     recent_ids, rest_ids = split_by_recency(records, window_end)
     # citations only matter for the non-recent half — don't hammer S2 for the rest
     citations = fetch_citation_counts(rest_ids, api_key=load_settings().s2_api_key)

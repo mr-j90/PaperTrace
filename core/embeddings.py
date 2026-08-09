@@ -20,7 +20,9 @@ def load_embedder(model_name: str) -> Embedder:
     """Load a sentence-transformers model lazily so tests never import torch."""
     from sentence_transformers import SentenceTransformer
 
-    model = SentenceTransformer(model_name)
+    # explicit CPU: MPS segfaults when tools run in executor threads, and every
+    # deploy target is CPU-only anyway
+    model = SentenceTransformer(model_name, device="cpu")
 
     def embed(texts: list[str]) -> list[list[float]]:
         vectors = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)

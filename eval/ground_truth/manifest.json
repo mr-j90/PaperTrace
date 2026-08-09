@@ -1,0 +1,18 @@
+{
+  "generated": "2026-08-09",
+  "snapshot_window_end": "2026-08-01",
+  "generator_model": "anthropic:claude-haiku-4-5",
+  "seed": 20260809,
+  "counts": {
+    "retrieval": 140,
+    "synthesis": 25,
+    "analytical": 25,
+    "freshness": 10
+  },
+  "hand_check": {
+    "status": "passed",
+    "by": "Jordan Taylor",
+    "date": "2026-08-09",
+    "sample": "6 retrieval + 3 synthesis reviewed in-session"
+  }
+}

@@ -215,38 +215,68 @@ class SemanticIndex:
             count_filter=Filter(must=[FieldCondition(key="layer", match=MatchValue(value=layer))]),
         ).count
 
-    def search(self, query: str, k: int, scope: Scope = "all") -> list[Evidence]:
+    def search(
+        self,
+        query: str,
+        k: int,
+        scope: Scope = "all",
+        mode: Literal["sparse", "dense", "hybrid", "hybrid_rerank"] = "hybrid_rerank",
+    ) -> list[Evidence]:
         """Hybrid RRF fusion -> cross-encoder rescoring -> per-paper dedup -> top-k.
 
-        The fused pool is capped at rerank_candidates; if it concentrates in few
-        papers the dedup cap can underfill k — accepted (spec'd top-30 pool).
+        `mode` exists for the eval ladder (#9): each rung isolates one design
+        decision. The shipped default is hybrid_rerank. The fused pool is capped at
+        rerank_candidates; if it concentrates in few papers the dedup cap can
+        underfill k — accepted (spec'd top-30 pool).
         """
-        [dense] = self._embed([query])
-        indices, values = self._sparse.embed_query(query)
         scope_filter = _scope_filter(scope)
-        candidates = self._client.query_points(
-            self._collection,
-            prefetch=[
-                Prefetch(
-                    query=dense,
-                    using=DENSE,
-                    limit=self._rerank_candidates,
-                    filter=scope_filter,
-                ),
-                Prefetch(
-                    query=SparseVector(indices=indices, values=values),
-                    using=SPARSE,
-                    limit=self._rerank_candidates,
-                    filter=scope_filter,
-                ),
-            ],
-            query=FusionQuery(fusion=Fusion.RRF),
-            limit=self._rerank_candidates,
-        ).points
+        if mode == "sparse":
+            indices, values = self._sparse.embed_query(query)
+            candidates = self._client.query_points(
+                self._collection,
+                query=SparseVector(indices=indices, values=values),
+                using=SPARSE,
+                query_filter=scope_filter,
+                limit=self._rerank_candidates,
+            ).points
+        elif mode == "dense":
+            [dense] = self._embed([query])
+            candidates = self._client.query_points(
+                self._collection,
+                query=dense,
+                using=DENSE,
+                query_filter=scope_filter,
+                limit=self._rerank_candidates,
+            ).points
+        else:
+            [dense] = self._embed([query])
+            indices, values = self._sparse.embed_query(query)
+            candidates = self._client.query_points(
+                self._collection,
+                prefetch=[
+                    Prefetch(
+                        query=dense,
+                        using=DENSE,
+                        limit=self._rerank_candidates,
+                        filter=scope_filter,
+                    ),
+                    Prefetch(
+                        query=SparseVector(indices=indices, values=values),
+                        using=SPARSE,
+                        limit=self._rerank_candidates,
+                        filter=scope_filter,
+                    ),
+                ],
+                query=FusionQuery(fusion=Fusion.RRF),
+                limit=self._rerank_candidates,
+            ).points
 
         payloads = [hit.payload or {} for hit in candidates]
-        texts = [str(p.get("text", "")) for p in payloads]
-        scores = self._rerank(query, texts)
+        if mode == "hybrid_rerank":
+            texts = [str(p.get("text", "")) for p in payloads]
+            scores = self._rerank(query, texts)
+        else:  # preserve the engine's own ranking
+            scores = [float(hit.score) for hit in candidates]
         ranked = sorted(zip(payloads, scores, strict=True), key=lambda pair: -pair[1])
 
         results: list[Evidence] = []

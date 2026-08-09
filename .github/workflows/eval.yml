@@ -1,0 +1,63 @@
+name: full-eval
+
+# On-demand (and optionally scheduled) full evaluation: builds the index from the
+# committed snapshot, runs the 4-way ladder + agent metrics + the 2x2 judge grid,
+# and uploads the report as a build artifact.
+#
+# Requires the ANTHROPIC_API_KEY repository secret (Settings -> Secrets -> Actions).
+# Approximate cost per run: ~$5 (judge grid) + ~$0.50 (agent metrics).
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_llm_grid:
+        description: "Skip the paid 2x2 judge grid (runs ladder + agent only)"
+        type: boolean
+        default: false
+
+jobs:
+  full-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    services:
+      qdrant:
+        image: qdrant/qdrant:v1.19.0
+        ports:
+          - 6333:6333
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --locked
+
+      - name: Build index from the committed snapshot (abstracts only)
+        run: uv run python -m ingest.flow --fulltext-budget 0
+
+      - name: Retrieval ladder (free, local models)
+        run: uv run python -m eval.run_retrieval
+
+      - name: Agent metrics
+        run: uv run python -m eval.run_agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: LLM judge grid
+        if: ${{ !inputs.skip_llm_grid }}
+        run: uv run python -m eval.run_llm
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Report
+        run: uv run python -m eval.report
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: eval-report
+          path: |
+            eval/results/*.json
+            eval/results/report.md
+            eval/results/judgments.jsonl
