@@ -3,17 +3,20 @@
 check: lint type test  ## all local checks (CI runs these + compose validation)
 
 # --- stack lifecycle ---------------------------------------------------------
-up:  ## build + start the full stack (web :3000, api :8000, prefect :4200, grafana :3001)
-	docker compose up -d --build
+# the observability profile (Langfuse) is part of the full stack
+COMPOSE := docker compose --profile observability
+
+up:  ## build + start the full stack (web :3000, api :8000, prefect :4200, grafana :3001, langfuse :3002)
+	$(COMPOSE) up -d --build
 
 down:  ## stop the stack (data volumes survive)
-	docker compose down
+	$(COMPOSE) down
 
 dev:  ## infra only (qdrant/postgres/prefect/grafana) — run api+web from source
 	docker compose up -d qdrant postgres prefect grafana
 
 logs:  ## follow logs for the whole stack
-	docker compose logs -f --tail 100
+	$(COMPOSE) logs -f --tail 100
 
 ingest:  ## build the knowledge base (tiny tier by default; FULLTEXT_BUDGET=n to change)
 	PREFECT_API_URL=http://localhost:4200/api \
@@ -21,7 +24,7 @@ ingest:  ## build the knowledge base (tiny tier by default; FULLTEXT_BUDGET=n to
 	uv run python -m ingest.flow
 
 reset:  ## stop the stack and DELETE ALL DATA VOLUMES (index, db, dashboards)
-	docker compose down -v
+	$(COMPOSE) down -v
 
 lint:
 	uv run ruff check .
