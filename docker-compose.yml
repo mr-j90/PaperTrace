@@ -29,6 +29,8 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - hf_cache:/data/hf-cache
+      # papers.duckdb + feedback.jsonl live on the host; see docs/adr/0001
+      - ./data:/app/data
     depends_on:
       - qdrant
   qdrant:

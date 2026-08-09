@@ -1,12 +1,12 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, ExternalLink, ThumbsDown, ThumbsUp } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Aperture, ExternalLink, ThumbsDown, ThumbsUp } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+import { Composer } from "@/components/composer";
 import { Trace } from "@/components/trace";
-import { streamChat } from "@/lib/stream";
 import { cn } from "@/lib/utils";
 import type { AssistantMessage, ChatMessage } from "@/types/chat";
 
@@ -115,71 +115,26 @@ function Feedback({
   );
 }
 
-export function Chat() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [input, setInput] = useState("");
-  const [busy, setBusy] = useState(false);
+export function Chat({
+  messages,
+  busy,
+  onAsk,
+  onFeedback,
+  modelId,
+  onModelChange,
+}: {
+  messages: ChatMessage[];
+  busy: boolean;
+  onAsk: (question: string) => void;
+  onFeedback: (index: number, thumbs: "up" | "down") => void;
+  modelId: string;
+  onModelChange: (id: string) => void;
+}) {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
-
-  const patchLast = useCallback((patch: (m: AssistantMessage) => AssistantMessage) => {
-    setMessages((all) => {
-      const last = all[all.length - 1];
-      if (!last || last.role !== "assistant") return all;
-      return [...all.slice(0, -1), patch(last)];
-    });
-  }, []);
-
-  const ask = useCallback(
-    async (question: string) => {
-      if (!question.trim() || busy) return;
-      setBusy(true);
-      setInput("");
-      setMessages((all) => [
-        ...all,
-        { role: "user", text: question },
-        { role: "assistant", text: "", citations: [], trace: [], streaming: true },
-      ]);
-      try {
-        for await (const event of streamChat(question)) {
-          if (event.type === "token") {
-            patchLast((m) => ({ ...m, text: m.text + event.text }));
-          } else if (event.type === "tool_call") {
-            patchLast((m) => ({
-              ...m,
-              text: "", // pre-tool tokens were loop reasoning, not the answer
-              trace: [...m.trace, { name: event.name, args: event.args }],
-            }));
-          } else if (event.type === "tool_result") {
-            patchLast((m) => {
-              const trace = [...m.trace];
-              const open = trace.findLastIndex((s) => s.name === event.name && !s.summary);
-              if (open >= 0)
-                trace[open] = { ...trace[open], summary: event.summary, ms: event.ms };
-              return { ...m, trace };
-            });
-          } else if (event.type === "done") {
-            patchLast((m) => ({
-              ...m,
-              text: event.answer,
-              citations: event.citations,
-              streaming: false,
-            }));
-          } else if (event.type === "error") {
-            patchLast((m) => ({ ...m, streaming: false, error: event.detail }));
-          }
-        }
-      } catch {
-        patchLast((m) => ({ ...m, streaming: false, error: "connection lost — try again" }));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [busy, patchLast],
-  );
 
   const lastQuestionFor = (index: number): string => {
     for (let i = index; i >= 0; i--) {
@@ -189,112 +144,78 @@ export function Chat() {
     return "";
   };
 
-  return (
-    <div className="mx-auto flex h-dvh max-w-3xl flex-col px-4">
-      <header className="flex items-center gap-2 py-4">
-        <span className="text-lg font-semibold tracking-tight">PaperTrace</span>
-        <span className="text-xs text-slate-400">
-          agentic RAG over the RAG / agents / eval / LLMOps literature
-        </span>
-      </header>
-
-      <main className="flex-1 space-y-6 overflow-y-auto pb-4">
-        {messages.length === 0 && (
-          <div className="flex h-full flex-col items-center justify-center gap-3">
-            <p className="text-sm text-slate-500">Ask about the literature — or try one of these:</p>
-            <div className="flex max-w-xl flex-wrap justify-center gap-2">
-              {CHIPS.map((chip) => (
-                <button
-                  key={chip}
-                  type="button"
-                  onClick={() => {
-                    setInput(chip); // populate, then submit
-                    void ask(chip);
-                  }}
-                  className="rounded-full border border-slate-200 px-3 py-1.5 text-left text-xs text-slate-600 hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:text-slate-100"
-                >
-                  {chip}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {messages.map((message, index) =>
-          message.role === "user" ? (
-            <div key={index} className="flex justify-end">
-              <div className="max-w-[85%] rounded-2xl bg-slate-900 px-4 py-2 text-sm text-slate-50 dark:bg-slate-100 dark:text-slate-900">
-                {message.text}
-              </div>
-            </div>
-          ) : (
-            <div key={index} className="text-sm">
-              <Trace steps={message.trace} streaming={message.streaming} />
-              {message.error ? (
-                <p className="text-amber-600 dark:text-amber-500">{message.error}</p>
-              ) : (
-                <div className="prose prose-sm prose-slate max-w-none dark:prose-invert [&_a]:break-all">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {message.text || (message.streaming ? "…" : "")}
-                  </ReactMarkdown>
-                </div>
-              )}
-              <CitationPills message={message} />
-              {!message.streaming && !message.error && message.text && (
-                <Feedback
-                  message={message}
-                  question={lastQuestionFor(index)}
-                  onFeedback={(thumbs) => setFeedbackAt(setMessages, index, thumbs)}
-                />
-              )}
-            </div>
-          ),
-        )}
-        <div ref={bottomRef} />
-      </main>
-
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          void ask(input);
-        }}
-        className="sticky bottom-0 bg-white pb-4 pt-2 dark:bg-slate-950"
-      >
-        <div className="flex items-end gap-2 rounded-2xl border border-slate-200 p-2 focus-within:border-slate-400 dark:border-slate-700 dark:focus-within:border-slate-500">
-          <textarea
-            value={input}
-            rows={1}
-            placeholder="Ask about RAG, agents, evals, LLMOps papers…"
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void ask(input);
-              }
-            }}
-            className="max-h-40 flex-1 resize-none bg-transparent px-2 py-1.5 text-sm outline-none"
+  if (messages.length === 0) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center px-4 pb-16">
+        <div className="w-full max-w-2xl space-y-6">
+          <h1 className="flex items-center justify-center gap-3 text-3xl font-semibold tracking-tight md:text-4xl">
+            <Aperture className="size-8 text-slate-700 md:size-9 dark:text-slate-300" />
+            Let&apos;s dig in.
+          </h1>
+          <Composer
+            busy={busy}
+            onAsk={onAsk}
+            modelId={modelId}
+            onModelChange={onModelChange}
+            autoFocus
           />
-          <button
-            type="submit"
-            disabled={busy || !input.trim()}
-            aria-label="send"
-            className="rounded-xl bg-slate-900 p-2 text-white disabled:opacity-30 dark:bg-slate-100 dark:text-slate-900"
-          >
-            <ArrowUp className="size-4" />
-          </button>
+          <div className="flex flex-wrap justify-center gap-2">
+            {CHIPS.map((chip) => (
+              <button
+                key={chip}
+                type="button"
+                onClick={() => onAsk(chip)}
+                className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-left text-xs text-slate-600 shadow-sm hover:border-slate-300 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400 dark:hover:border-slate-500 dark:hover:text-slate-100"
+              >
+                {chip}
+              </button>
+            ))}
+          </div>
         </div>
-      </form>
-    </div>
-  );
-}
+      </div>
+    );
+  }
 
-/** Mark feedback on the assistant message at `index`. */
-function setFeedbackAt(
-  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>,
-  index: number,
-  thumbs: "up" | "down",
-) {
-  setMessages((all) =>
-    all.map((m, i) => (i === index && m.role === "assistant" ? { ...m, feedback: thumbs } : m)),
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <main className="flex-1 overflow-y-auto">
+        <div className="mx-auto max-w-3xl space-y-6 px-4 py-6">
+          {messages.map((message, index) =>
+            message.role === "user" ? (
+              <div key={index} className="flex justify-end">
+                <div className="max-w-[85%] rounded-2xl bg-slate-900 px-4 py-2 text-sm text-slate-50 dark:bg-slate-100 dark:text-slate-900">
+                  {message.text}
+                </div>
+              </div>
+            ) : (
+              <div key={index} className="text-sm">
+                <Trace steps={message.trace} streaming={message.streaming} />
+                {message.error ? (
+                  <p className="text-amber-600 dark:text-amber-500">{message.error}</p>
+                ) : (
+                  <div className="prose prose-sm prose-slate max-w-none dark:prose-invert [&_a]:break-all">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {message.text || (message.streaming ? "…" : "")}
+                    </ReactMarkdown>
+                  </div>
+                )}
+                <CitationPills message={message} />
+                {!message.streaming && !message.error && message.text && (
+                  <Feedback
+                    message={message}
+                    question={lastQuestionFor(index)}
+                    onFeedback={(thumbs) => onFeedback(index, thumbs)}
+                  />
+                )}
+              </div>
+            ),
+          )}
+          <div ref={bottomRef} />
+        </div>
+      </main>
+      <div className="mx-auto w-full max-w-3xl px-4 pb-4">
+        <Composer busy={busy} onAsk={onAsk} modelId={modelId} onModelChange={onModelChange} />
+      </div>
+    </div>
   );
 }

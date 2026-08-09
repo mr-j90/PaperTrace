@@ -40,3 +40,12 @@ export type AssistantMessage = {
 export type UserMessage = { role: "user"; text: string };
 
 export type ChatMessage = UserMessage | AssistantMessage;
+
+/** A client-side chat thread, persisted to localStorage. */
+export type Conversation = {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  messages: ChatMessage[];
+};

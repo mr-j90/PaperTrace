@@ -3,12 +3,13 @@ import type { StreamEvent } from "@/types/chat";
 /** POST a question and yield parsed SSE events as they arrive. */
 export async function* streamChat(
   question: string,
+  model?: string,
   signal?: AbortSignal,
 ): AsyncGenerator<StreamEvent> {
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({ question, model }),
     signal,
   });
   if (!response.ok || !response.body) {
