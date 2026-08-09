@@ -53,7 +53,8 @@ class TurnStore:
             with psycopg.connect(self._dsn, connect_timeout=5) as con:
                 con.execute(schema)  # type: ignore[arg-type,unused-ignore]
             return True
-        except psycopg.Error:
+        except (psycopg.Error, OSError):
+            # missing schema file or unreachable Postgres must never stop the app
             logger.warning("monitoring store unavailable — writes will retry per turn")
             return False
 
