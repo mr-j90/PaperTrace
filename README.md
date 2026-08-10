@@ -1,191 +1,176 @@
-# PaperTrace — an agentic RAG app for the RAG/agents/eval/LLMOps literature
+# PaperTrace — LLM Zoomcamp Capstone (Reviewer Guide)
 
-An AI research assistant over the ~12,500 arXiv papers on **RAG, LLM agents, LLM
-evaluation, and LLMOps** — the literature about the very techniques it's built from.
-Ask it a question and watch it think: an agent visibly rewrites your query, chooses
-tools, gathers evidence across paper text *and* paper metadata, then answers with
-citations back to arXiv.
+> **You are on the `capstone-review` branch** — a reviewer-oriented walkthrough of this
+> project against the [LLM Zoomcamp evaluation criteria](https://github.com/DataTalksClub/llm-zoomcamp/blob/main/project.md).
+> The `master` branch carries the portfolio-style README; the code is identical.
 
-This is my LLM Zoomcamp capstone: an end-to-end agentic RAG application — ingestion to
-cloud — built and owned by me. The full decision trail lives in
-[`SPEC.md`](SPEC.md) and the wayfinder map under
-[`.scratch/arxiv-assistant/`](.scratch/arxiv-assistant/map.md).
+**PaperTrace** is an agentic RAG application over the ~13,300 arXiv papers on RAG, LLM
+agents, LLM evaluation, and LLMOps. One LLM agent, two grounded tools: hybrid semantic
+search over paper text, and typed SQL-backed queries over paper metadata — with every
+answer streaming its full reasoning trace (tool calls, evidence, latency) into the UI.
+
+Per the project brief this is *"a RAG application, an agent application, or a
+combination of both"* — deliberately the **combination**. The dataset is the sanctioned
+**"Articles"** kind (arXiv papers; the course FAQ is not used anywhere).
 
 ---
 
-## The problem
+## Reviewer quickstart (10 minutes)
 
-Questions about a fast-moving research field come in two shapes, and most tools serve
-only one:
+```bash
+git clone https://github.com/mr-j90/PaperTrace.git && cd PaperTrace
+git checkout capstone-review
+cp .env.example .env             # add ANTHROPIC_API_KEY=sk-ant-...  (the only paid API)
 
-- **Semantic** — *"How do the main approaches to evaluating RAG faithfulness differ?"*
-  Needs meaning-level search over paper text and multi-paper synthesis.
-- **Analytical** — *"How many agent-evaluation papers were published each month of
-  2026?"* Needs counting, filtering, grouping — things vector search is structurally
-  bad at.
-
-Big scholarly tools (Elicit, ScholarQA, alphaXiv) answer over all of science and can't
-afford per-paper depth on one niche; no open tool serves this niche with both layers.
-PaperTrace treats it as an **agent problem**: one LLM loop, two grounded tools —
-
-- `semantic_search` — hybrid (dense + sparse) retrieval with cross-encoder re-ranking
-  over a layered index: every paper's abstract, plus section-level full text for a
-  curated ~2,000-paper tier.
-- `metadata_query` — typed filters/aggregations over the full corpus's metadata in
-  DuckDB. Counts are counted, not vibed.
-
-The agent's whole thought process — rewritten queries, tool calls, evidence, latency —
-streams into the chat as an inline, collapsible **trace** on every answer.
-
-Architecture deep dive: [`docs/metadata-query-agent-graph.md`](docs/metadata-query-agent-graph.md)
-
-## How it works
-
-```
- browser ──► Next.js chat (inline agent trace, citations, 👍/👎)
-                │ SSE
-                ▼
-            FastAPI ──► LangGraph agent (evidence loop)
-                          ├── semantic_search ──► Qdrant   (hybrid + re-rank)
-                          └── metadata_query  ──► DuckDB   (CC0 arXiv metadata)
-                                   ▲
-                     Prefect ingestion (snapshot | daily delta)
-                                   ▲
-                     arXiv API (pinned queries, polite rate)
-
- every turn ──► Langfuse trace (self-hosted)  +  Postgres row ──► Grafana (6 charts)
+make up                          # full stack: web, api, qdrant, postgres, grafana,
+                                 #   prefect, langfuse (~first build takes a few minutes)
+make ingest                      # knowledge base from the committed snapshot (~10 min:
+                                 #   13.3k abstract embeddings + a small full-text tier)
 ```
 
-- **Corpus:** ~12,526 papers (8 pinned topical queries, 2020→now, verified against
-  arXiv search). Metadata and abstracts are CC0 and ship in the repo; full text is
-  fetched at ingest (HTML-first) and never redistributed. A **pinned snapshot** makes
-  every eval and every reviewer run reproducible; the live instance refreshes daily.
-- **Agent:** LangGraph evidence loop — rewrite → tool-choice → gather → synthesize —
-  with Claude by default (Haiku dev / Sonnet demo), swappable to OpenAI/Groq/Ollama
-  with one env change. Embeddings and re-ranker run locally; the chat LLM is the only
-  paid API.
-- **Ingestion:** one parameterized Prefect flow, two modes (snapshot / daily delta):
-  fetch → normalize → load DuckDB → select full-text tier → parse → chunk → embed →
-  index → validate.
+Then open:
 
-## The eval story
-
-No open-source paper assistant I surveyed ships a real evaluation. This one treats the
-eval as a first-class deliverable — **[read the current report](eval/results/report.md)**
-(committed, regenerated by `uv run python -m eval.report`):
-
-| Layer | What's measured |
+| URL | What you're looking at |
 |---|---|
-| Retrieval | 4-way ladder — BM25 → dense → hybrid → hybrid+re-rank — **0.893 hit-rate@8** for the shipped hybrid+rerank (dense-only 0.72, BM25 0.86, hybrid 0.86) on 140 pinned questions |
-| Answers | 2 prompts × 2 models, LLM-as-judge (faithfulness, citation correctness, completeness) + hand spot-checks |
-| Agent | **0.995 routing accuracy** across 200 questions; tool-arg match **1.0**; execution accuracy **1.0** |
-| CI | A free smoke slice runs on every push and fails on regression |
+| http://localhost:3000 | The chat UI — click a suggested chip, expand the **trace** on the answer |
+| http://localhost:4200 | Prefect — the ingestion flow run + the registered `daily-delta` schedule |
+| http://localhost:3001 | Grafana — the monitoring dashboard (7 charts, no login) |
+| http://localhost:3002 | Langfuse — per-turn traces (`dev@papertrace.local` / `papertrace123`) |
 
-Ground truth: ~200 LLM-generated, hand-checked questions pinned to the corpus snapshot,
-every record labeled with its expected tool.
+Four questions that exercise the four behaviors (they're the UI's suggested chips):
 
-## Ops
+1. *"How do the main approaches to evaluating RAG faithfulness differ?"* — multi-step semantic synthesis
+2. *"How many papers about agent evaluation were published each month of 2026?"* — exact analytical counts (watch the SQL in the trace)
+3. *"What's new in RAG evaluation this month?"* — date-filtered freshness
+4. *"What retrieval approaches does the RAG paper by Lewis et al. combine?"* — targeted lookup, hybrid + rerank at work
 
-Every turn dual-writes: a full **Langfuse** trace (self-hosted — the whole LLMOps stack
-runs in this repo's compose) and a flat **Postgres** row feeding a **Grafana**
-dashboard-as-code with six charts (volume, latency p50/p95, route split, feedback rate,
-cost/day, tool-error rate). User feedback (👍/👎 + comment) lands in both.
+---
 
-Deployment is **Fly.io, fully self-hosted, estate-as-code**: a `fly.toml` per app plus
-an idempotent `bootstrap.sh` — the same compose stack you run locally is what runs in
-production. GitHub Actions lint/test/eval-smoke every PR and auto-deploy green merges.
-The live demo is guarded by a per-session rate limit and a $2/day LLM spend cap.
+## The evaluation criteria, one by one
 
-## Quickstart
+### 1. Problem description
 
-```bash
-git clone https://github.com/mr-j90/llm-zoomcamp-project-capstone.git
-cd llm-zoomcamp-project-capstone
-cp .env.example .env            # set ANTHROPIC_API_KEY (or swap provider — see docs)
-docker compose up               # api, web, qdrant, postgres, grafana, prefect
-                                # (+ langfuse via: --profile observability)
-# open http://localhost:3000
+*The problem*: questions about a fast-moving research field come in two shapes —
+semantic ("how do X approaches differ?") and analytical ("how many papers per
+month?") — and naive RAG is structurally bad at the second (top-k retrieval hands you
+a vibe, not a number). PaperTrace routes between a hybrid retriever and a typed
+metadata engine via LLM tool choice. Full context: this README, [`SPEC.md`](SPEC.md) §1–2,
+and the complete decision record in [`.scratch/arxiv-assistant/`](.scratch/arxiv-assistant/map.md).
+
+### 2. Retrieval flow — knowledge base + LLM, end to end
+
+A LangGraph agent ([`core/agent.py`](core/agent.py)) drives two tools
+([`core/tools.py`](core/tools.py)):
+
+- `semantic_search` → **Qdrant** (one layered collection: 13.3k abstract cards + section-level
+  full text for a curated tier) — [`core/retrieval.py`](core/retrieval.py)
+- `metadata_query` → **DuckDB** (typed, parameter-bound SQL built by the tool, never the LLM) —
+  [`core/metadata.py`](core/metadata.py)
+
+Answers cite only papers actually returned as evidence (hallucinated ids are dropped:
+`_ground_citations` in [`core/agent.py`](core/agent.py)).
+
+### 3. Retrieval evaluation — multiple approaches, best one used
+
+The 4-way ladder in [`eval/results/report.md`](eval/results/report.md), 140 ground-truth
+questions, hit-rate@8 / MRR:
+
+| mode | hit@8 | MRR |
+|---|---|---|
+| sparse (BM25) | 0.864 | 0.740 |
+| dense | 0.721 | 0.552 |
+| hybrid | 0.857 | 0.754 |
+| **hybrid + rerank (shipped)** | **0.893** | 0.749 |
+
+Reproduce free & locally: `uv run python -m eval.run_retrieval` ([`eval/run_retrieval.py`](eval/run_retrieval.py)).
+The shipped default is the winner (`core/retrieval.py`, `mode="hybrid_rerank"`).
+
+### 4. LLM evaluation — multiple approaches, best one used
+
+2 prompts × 2 models, LLM-as-judge (faithfulness / citation correctness / completeness),
+in [`eval/results/report.md`](eval/results/report.md): the **citation-strict prompt wins**
+(+0.39 over a loose baseline on Haiku) and is the shipped system prompt; Sonnet edges
+Haiku, matching the documented model tiering. Judge caveat + raw judgments committed
+([`eval/results/judgments.jsonl`](eval/results/judgments.jsonl)).
+Reproduce: `uv run python -m eval.run_llm` (~$5). Agent-level metrics too:
+**routing accuracy 0.995, tool-arg match 1.0, execution accuracy 1.0** (n=200,
+`uv run python -m eval.run_agent`).
+
+### 5. Interface — UI *and* API
+
+- **Web UI** (Next.js, [`web/`](web/)): streaming chat, inline collapsible trace,
+  arXiv citation pills, suggested chips, model picker, 👍/👎 + comment feedback.
+- **API** (FastAPI, [`api/main.py`](api/main.py)): `POST /chat` streams the agent's events
+  over SSE; `POST /feedback`; `GET /healthz`. Try it raw:
+  ```bash
+  curl -sN -X POST localhost:8000/chat -H 'Content-Type: application/json' \
+    -d '{"question": "How many rag papers in June 2026?"}'
+  ```
+
+### 6. Ingestion pipeline — automated, dedicated tool (Prefect)
+
+One parameterized **Prefect** flow, two modes ([`ingest/flow.py`](ingest/flow.py),
+[`ingest/delta.py`](ingest/delta.py)): snapshot ingest (fetch → normalize → DuckDB →
+tier select → HTML-first full text → chunk → embed → index → validation report) and a
+**daily delta refresh** (watermark + revision sweep, withdrawal flagging, scheduled
+`0 6 * * *` — visible under Deployments at localhost:4200, run by the compose
+`scheduler` service).
+
+### 7. Monitoring — feedback collected + dashboard with 5+ charts
+
+Every turn dual-writes ([`api/main.py`](api/main.py), [`core/turnlog.py`](core/turnlog.py)):
+a **Langfuse** trace (self-hosted, sessions per conversation, feedback as scores) and a
+**Postgres** row. **Grafana** auto-provisions a **7-chart** dashboard as code
+([`monitoring/grafana/`](monitoring/grafana/)): query volume, latency p50/p95, route
+split, feedback rate, cost/day, turn-error rate, tokens/day — anonymous read at
+localhost:3001. User feedback (thumbs + comment) lands in both stores, keyed by turn.
+
+### 8. Containerization — everything in docker-compose
+
+[`docker-compose.yml`](docker-compose.yml): web, api, qdrant, postgres, grafana,
+prefect, scheduler, plus the self-hosted Langfuse stack (6 pinned services) as the
+`observability` profile. `make up` starts all of it; `make down` / `make reset` manage it.
+
+### 9. Reproducibility
+
+- **Data ships in the repo**: the pinned corpus snapshot ([`data/snapshot/`](data/snapshot/) —
+  CC0 metadata for 13,124 papers, manifest with per-topic counts) is committed;
+  `make ingest` needs no network calls to arXiv. Regeneration is scripted and rate-limit
+  polite ([`ingest/snapshot.py`](ingest/snapshot.py)).
+- **Pinned everything**: `uv.lock`, `bun.lock`, pinned Docker images, `.python-version`.
+- **CI proves it**: every push runs lint, types, 47 tests, an **eval smoke slice with
+  real local models**, and compose validation on a cold runner
+  ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+- Ground truth + eval results committed; full eval re-runnable via
+  [`.github/workflows/eval.yml`](.github/workflows/eval.yml) (on-demand).
+
+### 10. Best practices (bonus points)
+
+| Practice | Where | Evidence |
+|---|---|---|
+| Hybrid search (text + vector) | BM25 sparse + dense bge, RRF fusion in Qdrant (`core/retrieval.py`) | ladder: hybrid 0.857 vs dense 0.721 |
+| Document re-ranking | local cross-encoder rescoring fused top-30 (`core/rerank.py`) | ladder: 0.893 hit@8, best rung |
+| User query rewriting | the agent's explicit query-formulation step — visible in every trace | trace UI; system prompt in `core/agent.py` |
+
+### Bonus: cloud deployment — **not claimed**
+
+Deliberately descoped ([#11](https://github.com/mr-j90/PaperTrace/issues/11)); the full
+Fly.io estate-as-code design is documented in [`SPEC.md`](SPEC.md) §9 for future work.
+Everything runs locally with `make up`.
+
+---
+
+## Repo map
+
 ```
-
-1. Ingest the pinned snapshot: `docker compose run ingest snapshot`
-   (or a fast, tiny full-text tier: `FULLTEXT_BUDGET=25 docker compose run ingest snapshot`)
-2. Ask something — try the suggested chips, and open the trace on any answer.
-3. Evals: `uv run eval/run_retrieval.py` (see `eval/README` for the full harness);
-   dashboards at `localhost:3001` (Grafana), traces at `localhost:3002` (Langfuse).
-
-## Development
-
-```bash
-uv sync        # install (Python 3.12, pinned via .python-version)
-make check     # everything CI runs: ruff lint+format, mypy, pytest
-
-make up        # build + start the full stack (web :3000, api :8000, prefect :4200)
-make ingest    # build the knowledge base (tiny full-text tier; FULLTEXT_BUDGET=n)
-make down      # stop it (volumes survive) · make reset wipes volumes too
-
-make dev       # infra only — then: uv run uvicorn api.main:app --port 8000
-cd web && bun install && bun dev   # and the chat UI on :3000, from source
+core/        agent (evidence loop), retrieval, metadata engine, monitoring writer
+api/         FastAPI: SSE chat, feedback, health
+web/         Next.js chat UI with the inline trace
+ingest/      snapshot harvester, Prefect flows (snapshot + daily delta), scheduler
+eval/        ground truth, 4 runners, committed results + report, CI smoke gate
+monitoring/  Postgres schema, Grafana dashboards-as-code
+data/        committed pinned snapshot (CC0) + query definitions
+.scratch/    the full decision record (wayfinder map + 10 resolved decision tickets)
+SPEC.md      the locked v1 spec every section of this project traces to
+CONTEXT.md   the project's domain glossary
 ```
-
-CI (GitHub Actions) runs `make check`'s steps plus a compose validation on every PR
-and push to master.
-
-### Corpus snapshot
-
-The pinned corpus ships in the repo — `data/snapshot/` holds the metadata JSONL
-(CC0), the sorted ID list, and a manifest with per-topic counts; **you don't need to
-fetch anything to use it.** To regenerate it from the committed query definitions
-(`data/queries.toml`, the corpus's source of truth):
-
-```bash
-uv run python -m ingest.snapshot              # full harvest, ~5 min at arXiv's polite rate
-uv run python -m ingest.snapshot --limit 50   # quick smoke run (don't commit)
-```
-
-The harvester respects arXiv's API terms (1 request / 3 s, single connection) and
-fails loudly rather than committing a short corpus.
-
-### Building the knowledge base
-
-One Prefect flow ingests the snapshot end-to-end (normalize → DuckDB → full-text
-tier → section chunks → Qdrant):
-
-```bash
-docker compose up -d qdrant prefect
-PREFECT_API_URL=http://localhost:4200/api \
-PAPERTRACE_FULLTEXT_BUDGET=25 uv run python -m ingest.flow   # minutes; full tier ~2h
-```
-
-Watch the run (and its validation report artifact) at http://localhost:4200.
-When an update changes the index shape (e.g. #5's hybrid vectors), the flow
-recreates the collection and logs it — just re-run the flow after pulling.
-`--fulltext-budget N` (or the env var) caps the full-text tier; within the budget,
-half goes to the newest papers and half to the most-cited (Semantic Scholar), so
-the tier stays hybrid at any size. Abstract cards cover every non-withdrawn paper
-(withdrawn ones stay flagged and queryable in DuckDB). Full text is fetched
-politely and never committed (licensing).
-
-## Rubric map (for reviewers)
-
-| Criterion | Where |
-|---|---|
-| Problem description | This README + [SPEC §1](SPEC.md) |
-| Retrieval flow | Knowledge base (Qdrant + DuckDB) + LLM agent |
-| Retrieval evaluation | 4-way ladder, best used · `eval/` |
-| LLM evaluation | 2×2 grid, LLM-judge + execution accuracy · `eval/` |
-| Interface | Next.js UI **and** FastAPI API |
-| Ingestion pipeline | Prefect (dedicated tool) · `ingest/` |
-| Monitoring | Feedback + Grafana dashboard (6 charts) · `monitoring/` |
-| Containerization | Everything in docker-compose |
-| Reproducibility | Pinned snapshot + committed queries/IDs + pinned deps |
-| Best practices | Hybrid search · re-ranking · query rewriting (all evidenced in `eval/`) |
-| Cloud | Fly.io, estate-as-code · `deploy/fly/` |
-
-## v2 (explicitly deferred)
-
-Live fetch of out-of-corpus papers · paper upload · per-paper deep-dive surface ·
-scheduled digests · text-to-SQL for the metadata store · MCP server exposure.
-
-## License
-
-MIT
