@@ -54,8 +54,7 @@ Four questions that exercise the four behaviors (they're the UI's suggested chip
 semantic ("how do X approaches differ?") and analytical ("how many papers per
 month?") — and naive RAG is structurally bad at the second (top-k retrieval hands you
 a vibe, not a number). PaperTrace routes between a hybrid retriever and a typed
-metadata engine via LLM tool choice. Full context: this README, [`SPEC.md`](SPEC.md) §1–2,
-and the complete decision record in [`.scratch/arxiv-assistant/`](.scratch/arxiv-assistant/map.md).
+metadata engine via LLM tool choice.
 
 ### 2. Retrieval flow — knowledge base + LLM, end to end
 
