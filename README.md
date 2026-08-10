@@ -1,5 +1,5 @@
 # PaperTrace — LLM Zoomcamp Capstone (Reviewer Guide)
-<img width="1499" height="902" alt="CleanShot 2026-08-10 at 08 48 17" src="https://github.com/user-attachments/assets/dfc290f6-097c-439e-b74e-d7a2a1abb9e5" />
+<img width="1489" height="900" alt="CleanShot 2026-08-10 at 08 49 32" src="https://github.com/user-attachments/assets/d005b4e2-6446-4454-ae7a-4168c0123beb" />
 
 > **You are on the `capstone-review` branch** — a reviewer-oriented walkthrough of this
 > project against the [LLM Zoomcamp evaluation criteria](https://github.com/DataTalksClub/llm-zoomcamp/blob/main/project.md).
