@@ -46,6 +46,8 @@ services:
       PAPERTRACE_POSTGRES_DSN: postgresql://papertrace:${POSTGRES_PASSWORD:-papertrace}@postgres:5432/papertrace
       PREFECT_API_URL: http://prefect:4200/api  # in-container flow runs show in the UI
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      PAPERTRACE_CHAT_MODEL: ${PAPERTRACE_CHAT_MODEL:-anthropic:claude-haiku-4-5}
       # in-container Langfuse is always reached via service DNS — a host-side
       # LANGFUSE_HOST in .env (for source-mode dev) must not leak in here
       LANGFUSE_HOST: http://langfuse-web:3000
